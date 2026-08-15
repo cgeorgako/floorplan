@@ -101,9 +101,10 @@ def _draw_floor_page(c: canvas.Canvas, plan: FloorPlan, prop: Proposal) -> None:
     def mx(x: float) -> float: return ox + x * k
     def my(y: float) -> float: return oy + y * k
 
-    # 1) τοίχοι = γεμάτο περίγραμμα, οι χώροι λευκαίνονται από πάνω
+    # 1) τοίχοι = γεμάτη μάζα περιγράμματος (ανά κύτταρο → σωστό Γ-σχήμα)
     c.setFillGray(WALL_GRAY)
-    c.rect(mx(0), my(0), draw_w, draw_h, stroke=0, fill=1)
+    for (cx0, cy0, cx1, cy1) in (plan.cells or [(0, 0, W, L)]):
+        c.rect(mx(cx0), my(cy0), (cx1 - cx0) * k, (cy1 - cy0) * k, stroke=0, fill=1)
 
     # 2) χώροι
     c.setLineWidth(0.5)
@@ -112,6 +113,17 @@ def _draw_floor_page(c: canvas.Canvas, plan: FloorPlan, prop: Proposal) -> None:
         c.setFillColorRGB(*rgb)
         c.setStrokeGray(0.15)
         c.rect(mx(room.x0), my(room.y0), room.w * k, room.d * k, stroke=1, fill=1)
+
+    # 2β) εξωτερικό περίγραμμα (πολύγωνο) — έντονη γραμμή
+    outline = plan.outline or [(0, 0), (W, 0), (W, L), (0, L)]
+    c.setStrokeGray(0.0)
+    c.setLineWidth(1.4)
+    p = c.beginPath()
+    p.moveTo(mx(outline[0][0]), my(outline[0][1]))
+    for (x, y) in outline[1:]:
+        p.lineTo(mx(x), my(y))
+    p.close()
+    c.drawPath(p, stroke=1, fill=0)
 
     # 3) ανοίγματα (λευκά κενά στους τοίχους + σύμβολο)
     for room in plan.rooms:
@@ -146,6 +158,9 @@ def _draw_openings(c, room: Room, plan: FloorPlan, mx, my, k) -> None:
             xx = x if op.side == "E" else x - t
             c.rect(mx(xx), my(y), t * k, op.width * k, stroke=0, fill=1)
         # σύμβολο
+        if op.kind == "opening":
+            # ανοιχτό πέρασμα (λειτουργική επικοινωνία): μόνο το λευκό κενό
+            continue
         c.setStrokeColorRGB(0.10, 0.35, 0.75)
         c.setLineWidth(0.7)
         (ax, ay), (bx, by) = _endpoints(room, op)

@@ -51,9 +51,11 @@ def _print_report(spec: BuildingSpec, proposals: List[Proposal],
     print("═" * 68)
     print(f"  Περίγραμμα (μέγ.): {fmt(spec.max_width_ew)} × "
           f"{fmt(spec.max_length_ns)} m  |  Μέγ. εμβ.: {fmt(spec.max_total_area)} m²")
+    shape = "πολυγωνικό (Γ)" if spec.is_polygonal else "ορθογώνιο"
     print(f"  Είσοδος: {spec.entrance.gr}  |  Όροφοι: {spec.floors}  |  "
           f"Υ/Δ: {spec.bedrooms}  Λουτρά: {spec.baths}  WC: {spec.wcs}")
-    print(f"  Τοιχοποιία: εξωτ. {fmt(spec.ext_wall)} m / εσωτ. {fmt(spec.int_wall)} m")
+    print(f"  Τοιχοποιία: εξωτ. {fmt(spec.ext_wall)} m / εσωτ. {fmt(spec.int_wall)} m"
+          f"  |  Περίγραμμα: {shape}")
     print("─" * 68)
     for prop in proposals:
         dims = " + ".join(f"{fmt(fl.width_ew)}×{fmt(fl.length_ns)}"

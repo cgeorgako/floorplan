@@ -107,6 +107,9 @@ def _draw_openings(dxf: DXF, room: Room, ox: float, oy: float) -> None:
     for op in room.openings:
         (ax, ay), (bx, by) = _opening_endpoints(room, op)
         ax, ay, bx, by = ax + ox, ay + oy, bx + ox, by + oy
+        if op.kind == "opening":
+            # ανοιχτό πέρασμα (λειτουργική επικοινωνία): μόνο παρειές, χωρίς φύλλο
+            continue
         if op.kind == "window":
             # παράθυρο: γραμμή υαλοπίνακα + δύο μικρές παρειές
             dxf.line("OPENINGS", ax, ay, bx, by)
@@ -127,9 +130,12 @@ def _draw_openings(dxf: DXF, room: Room, ox: float, oy: float) -> None:
 def _draw_floor(dxf: DXF, plan: FloorPlan, ox: float, oy: float) -> None:
     W, L, te = plan.width_ew, plan.length_ns, plan.ext_wall
 
-    # Εξωτερικό περίγραμμα + εσωτερική παρειά εξωτερικού τοίχου (διπλή γραμμή)
-    dxf.rect("OUTLINE", ox, oy, ox + W, oy + L)
-    dxf.rect("WALLS", ox + te, oy + te, ox + W - te, oy + L - te)
+    # Εξωτερικό περίγραμμα (ορθογωνισμένο πολύγωνο) + εσωτερική παρειά
+    outline = plan.outline or [(0, 0), (W, 0), (W, L), (0, L)]
+    dxf.polyline("OUTLINE", [(ox + x, oy + y) for (x, y) in outline], closed=True)
+    for (cx0, cy0, cx1, cy1) in (plan.cells or [(0, 0, W, L)]):
+        dxf.rect("WALLS", ox + cx0 + te, oy + cy0 + te,
+                 ox + cx1 - te, oy + cy1 - te)
 
     # Χώροι (καθαρά ορθογώνια) + ονόματα/εμβαδά/διαστάσεις
     for room in plan.rooms:

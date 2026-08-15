@@ -123,10 +123,20 @@ class BuildingSpec:
 
     num_proposals: int           # πλήθος προτάσεων-λύσεων
 
+    # Σχήμα εξωτερικού περιγράμματος: "polygonal" (Γ/L — προεπιλογή) ή
+    # "rectangular" (ορθογώνιο, μόνο αν ζητηθεί ρητά). Πάντα ορθογωνισμένο,
+    # χωρίς καμπύλες.
+    footprint_shape: str = "polygonal"
+
     # Προαιρετικές παράμετροι με λογικές προεπιλογές
     project_name: str = "Κατοικία"
     client: str = ""
     location: str = "Αμαλιάδα, Π.Ε. Ηλείας"
+
+    @property
+    def is_polygonal(self) -> bool:
+        return str(self.footprint_shape).strip().lower() not in (
+            "rectangular", "rect", "ορθογώνιο", "ορθογωνικό", "orthogonal")
 
     def validate(self) -> List[str]:
         errs: List[str] = []
@@ -169,6 +179,9 @@ class Room:
     x1: float
     y1: float
     openings: List[Opening] = field(default_factory=list)
+    # Πλευρές του χώρου που εφάπτονται στο εξωτερικό περίβλημα ('N','S','E','W').
+    # Ορίζονται κατά την τοποθέτηση (γενικό για πολυγωνικά περιγράμματα).
+    ext_sides: set = field(default_factory=set)
 
     @property
     def w(self) -> float:      # καθαρό πλάτος (κατά X, Α–Δ)
@@ -195,16 +208,28 @@ class Room:
 class FloorPlan:
     """Μία κάτοψη ορόφου."""
     floor_label: str             # π.χ. "Ισόγειο", "Α' Όροφος"
-    width_ew: float              # εξωτερικό πλάτος κτιρίου (X, m)
-    length_ns: float             # εξωτερικό μήκος κτιρίου (Y, m)
+    width_ew: float              # πλάτος περιβάλλοντος ορθογωνίου (X, m)
+    length_ns: float             # μήκος περιβάλλοντος ορθογωνίου (Y, m)
     ext_wall: float
     int_wall: float
     rooms: List[Room] = field(default_factory=list)
     entrance: Optional[Orientation] = None
+    # Εξωτερικό περίγραμμα ως ορθογωνισμένο πολύγωνο (λίστα κορυφών, CCW).
+    outline: List[Tuple[float, float]] = field(default_factory=list)
+    # Ορθογώνια «κύτταρα» που συνθέτουν το περίγραμμα (για σχεδίαση τοίχων).
+    cells: List[Tuple[float, float, float, float]] = field(default_factory=list)
 
     @property
     def footprint_area(self) -> float:
-        """Μικτό εμβαδόν με τοίχους (εξωτερικό περίγραμμα)."""
+        """Μικτό εμβαδόν με τοίχους (εμβαδόν πολυγώνου περιγράμματος)."""
+        if len(self.outline) >= 3:
+            s = 0.0
+            n = len(self.outline)
+            for i in range(n):
+                x0, y0 = self.outline[i]
+                x1, y1 = self.outline[(i + 1) % n]
+                s += x0 * y1 - x1 * y0
+            return abs(s) / 2.0
         return self.width_ew * self.length_ns
 
     @property

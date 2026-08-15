@@ -37,6 +37,7 @@ def spec_from_dict(d: Dict[str, Any]) -> BuildingSpec:
         min_bedroom_side=float(d.get("min_bedroom_side", 3.0)),
         max_total_area=float(d["max_total_area"]),
         num_proposals=int(d.get("num_proposals", 3)),
+        footprint_shape=str(d.get("footprint_shape", "polygonal")),
         project_name=str(d.get("project_name", "Κατοικία")),
         client=str(d.get("client", "")),
         location=str(d.get("location", "Αμαλιάδα, Π.Ε. Ηλείας")),
@@ -81,8 +82,11 @@ def interactive_spec() -> BuildingSpec:
     print("(Enter = προεπιλεγμένη τιμή)\n")
 
     name = _ask("Ονομασία έργου", "Κατοικία")
-    w = _ask_float("Μέγιστο πλάτος περιγράμματος Ανατολή–Δύση (m)", 12.0)
-    l = _ask_float("Μέγιστο μήκος περιγράμματος Βορρά–Νότο (m)", 9.0)
+    w = _ask_float("Μέγιστο πλάτος περιγράμματος Ανατολή–Δύση (m)", 13.0)
+    l = _ask_float("Μέγιστο μήκος περιγράμματος Βορρά–Νότο (m)", 10.0)
+    shape_raw = _ask("Σχήμα περιγράμματος: πολυγωνικό (Γ) ή ορθογώνιο", "πολυγωνικό")
+    shape = "rectangular" if shape_raw.strip().lower() in (
+        "ορθογώνιο", "ορθογωνικό", "rectangular", "rect", "ο") else "polygonal"
     ent = _ask("Προσανατολισμός κύριας εισόδου (Β/Ν/Α/Δ)", "Ν")
     floors = _ask_int("Όροφοι — 1 (ισόγειο) ή 2 (διώροφο)", 1)
     ext = _ask_float("Πάχος εξωτερικής τοιχοποιίας (m)", 0.30)
@@ -104,7 +108,8 @@ def interactive_spec() -> BuildingSpec:
         floors=floors, ext_wall=ext, int_wall=inn, bedrooms=beds, baths=baths,
         wcs=wcs, has_storage=storage, has_wardrobe=wardrobe, has_living=living,
         has_salon=salon, has_big_kitchen=big_kitchen, min_bedroom_side=min_side,
-        max_total_area=max_area, num_proposals=n, project_name=name,
+        max_total_area=max_area, num_proposals=n, footprint_shape=shape,
+        project_name=name,
     )
 
 

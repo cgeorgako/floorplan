@@ -70,6 +70,45 @@ def test_bedrooms_meet_min_side():
                     assert min(r.w, r.d) >= 3.0 - 0.05, f"{r.name} {r.w:.2f}×{r.d:.2f}"
 
 
+def test_polygonal_default_is_L():
+    # προεπιλογή = πολυγωνικό (Γ) σε μονώροφο → περίγραμμα με 6 κορυφές
+    props = generate_proposals(_spec(footprint_shape="polygonal"))
+    assert any(len(p.floors[0].outline) >= 6 for p in props), \
+        "Καμία πρόταση δεν παρήγαγε Γ-σχήμα"
+
+
+def test_rectangular_override():
+    p = generate_proposals(_spec(footprint_shape="rectangular"))[0]
+    assert len(p.floors[0].outline) == 4
+
+
+def test_no_curves_only_orthogonal():
+    # κάθε ακμή του περιγράμματος είναι οριζόντια ή κατακόρυφη (χωρίς καμπύλες)
+    for p in generate_proposals(_spec()):
+        o = p.floors[0].outline
+        for i in range(len(o)):
+            x0, y0 = o[i]
+            x1, y1 = o[(i + 1) % len(o)]
+            assert abs(x0 - x1) < 1e-6 or abs(y0 - y1) < 1e-6
+
+
+def test_day_zone_open_communication():
+    # καθιστικό↔σαλόνι↔κουζίνα: ανοιχτά περάσματα (kind="opening")
+    p = generate_proposals(_spec())[0]
+    openings = [op for r in p.floors[0].rooms for op in r.openings
+                if op.kind == "opening"]
+    assert len(openings) >= 2, "Λείπει η λειτουργική επικοινωνία ζώνης ημέρας"
+
+
+def test_corridor_is_minimized():
+    # ο διάδρομος να μένει κάτω από ~16% της καθαρής επιφάνειας (Α.6.2)
+    for p in generate_proposals(_spec()):
+        for fl in p.floors:
+            corr = sum(r.area for r in fl.rooms if r.category == Category.CORRIDOR)
+            assert corr <= 0.16 * fl.net_area + 1e-6, \
+                f"Διάδρομος {corr:.1f} m² > 16% του καθαρού"
+
+
 def test_compliance_runs():
     p = generate_proposals(_spec())[0]
     rows = check_floor(p.floors[0])
