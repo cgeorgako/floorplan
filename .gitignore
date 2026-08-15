@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+out/
+out_*/
+*.pdf
+*.dxf
+!examples/**/*.pdf
+!examples/**/*.dxf
+.DS_Store

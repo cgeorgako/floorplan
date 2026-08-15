@@ -1,0 +1,22 @@
+{
+  "project_name": "Μονοκατοικία Αμαλιάδας",
+  "client": "—",
+  "location": "Αμαλιάδα, Π.Ε. Ηλείας",
+  "max_width_ew": 13.0,
+  "max_length_ns": 10.0,
+  "entrance": "Ν",
+  "floors": 1,
+  "ext_wall": 0.30,
+  "int_wall": 0.10,
+  "bedrooms": 3,
+  "baths": 1,
+  "wcs": 1,
+  "has_storage": true,
+  "has_wardrobe": false,
+  "has_living": true,
+  "has_salon": true,
+  "has_big_kitchen": true,
+  "min_bedroom_side": 3.0,
+  "max_total_area": 130.0,
+  "num_proposals": 3
+}
