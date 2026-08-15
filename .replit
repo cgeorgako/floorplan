@@ -1,9 +1,10 @@
 # Ρύθμιση Replit — άνοιξε το repo στο Replit και πάτησε «Run».
 run = ["bash", "-c", "pip install reportlab Flask >/dev/null 2>&1 && (pip install PyMuPDF >/dev/null 2>&1 || echo 'PyMuPDF προαιρετικό — παραλείπεται'); python -m webapp.app"]
 entrypoint = "webapp/app.py"
+modules = ["python-3.12", "web", "nix"]
 
 [nix]
-channel = "stable-24_05"
+channel = "stable-25_05"
 
 [env]
 HOST = "0.0.0.0"
