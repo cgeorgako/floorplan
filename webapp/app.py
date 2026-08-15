@@ -165,6 +165,8 @@ def download_file(run_id: str, filename: str):
 
 
 if __name__ == "__main__":
+    # HOST=0.0.0.0 ώστε να λειτουργεί και σε cloud (Codespaces/Replit/Render).
+    host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "5000"))
-    print(f"\n  ▶ Γεννήτρια κατόψεων — άνοιξε: http://127.0.0.1:{port}\n")
-    app.run(host="127.0.0.1", port=port, debug=False)
+    print(f"\n  ▶ Γεννήτρια κατόψεων — τοπικά: http://127.0.0.1:{port}\n")
+    app.run(host=host, port=port, debug=False)

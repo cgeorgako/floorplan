@@ -95,6 +95,9 @@ python -m webapp.app                            # ή: python webapp/app.py
 
 Τα αρχεία κάθε εκτέλεσης αποθηκεύονται προσωρινά στο `webapp/static/out/<id>/`.
 
+**Online εκτέλεση** (GitHub Codespaces / Replit / Render): βλ. [`DEPLOY.md`](DEPLOY.md).
+Σημείωση: το GitHub **Pages** δεν τρέχει Python — χρειάζεται περιβάλλον με backend.
+
 ### Γραμμή εντολών
 
 **Διαδραστικά** (ερωτήσεις στα ελληνικά):
