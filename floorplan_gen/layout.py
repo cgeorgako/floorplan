@@ -103,32 +103,30 @@ def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
     ordered = list(reversed(reqs)) if mirror else list(reqs)
     lw = te if ext.get("w") else ti / 2.0
     rw = te if ext.get("e") else ti / 2.0
-    bw = te if ext.get("s") else ti / 2.0
-    tw = te if ext.get("n") else ti / 2.0
     n = len(ordered)
     avail = (X1 - X0) - lw - rw - (n - 1) * ti
     if avail <= 0:
         avail = max(0.1, (X1 - X0) - lw - rw)
     widths = _fit_widths([r.target_area for r in ordered],
                          [r.min_width for r in ordered], avail)
-    y0 = Y0 + bw
-    y1 = Y1 - tw
     rooms: List[Room] = []
     x = X0 + lw
     for idx, (r, w) in enumerate(zip(ordered, widths)):
         rx0, rx1 = x, x + w
-        room = Room(r.category, r.name, rx0, y0, rx1, y1)
         es = set()
         if ext.get("s"):
             es.add("S")
-        if ext.get("n"):
-            es.add("N")
-        if north_ext_from_x is not None and rx0 >= north_ext_from_x - EPS:
-            es.add("N")
+        if ext.get("n") or (north_ext_from_x is not None
+                            and rx1 > north_ext_from_x + 0.05):
+            es.add("N")   # ο χώρος εισχωρεί στην εσοχή (Γ) → βόρεια όψη εξωτερική
         if ext.get("w") and idx == 0:
             es.add("W")
         if ext.get("e") and idx == n - 1:
             es.add("E")
+        # πάχος τοίχου ΑΝΑ πλευρά του χώρου: εξωτερικός te, εσωτερικός ti/2
+        bot = te if "S" in es else ti / 2.0
+        top = te if "N" in es else ti / 2.0
+        room = Room(r.category, r.name, rx0, Y0 + bot, rx1, Y1 - top)
         room.ext_sides = es
         rooms.append(room)
         x = rx1 + ti
@@ -245,24 +243,57 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
                                mirror, north_ext_from_x=(Wn if is_L else None))
         rooms += day_rooms
 
-    # Ζώνη νύχτας (βόρεια, πλάτος Wn). Ανατολικό άκρο = εσοχή (εξωτερικό).
+    # Ζώνη νύχτας (βόρεια). Υπνοδωμάτια σε βόρεια σειρά· βοηθητικοί κάτω.
+    corridor: Optional[Room] = None
     if beds:
         bed_rooms = _place_row(beds, 0.0, Wn, y_bed0, y_bed1, te, ti,
                                {"s": False, "n": True, "w": True, "e": True}, mirror)
         rooms += bed_rooms
-    if svc:
-        svc_rooms = _place_row(svc, 0.0, Wn, y_svc0, y_svc1, te, ti,
-                               {"s": False, "n": False, "w": True, "e": True}, mirror)
-        rooms += svc_rooms
 
-    # Διάδρομος (ελάχιστος): μόνο στο πλάτος της ζώνης νύχτας Wn
-    corridor: Optional[Room] = None
-    if (bed_rooms or svc_rooms) and cd > 0.05:
-        cx0 = te
-        cx1 = Wn - te
-        if cx1 - cx0 > 0.3:
-            corridor = Room(Category.CORRIDOR, "Διάδρομος", cx0, y_cor0 + ti / 2.0,
-                            cx1, y_cor1 - ti / 2.0)
+    full_depth = Hs + cd
+    # ΣΥΜΠΑΓΗΣ ΔΙΑΔΡΟΜΟΣ: δύο βοηθητικοί χώροι πλήρους βάθους στις γωνίες, ο
+    # διάδρομος μόνο στο κεντρικό τμήμα (τα ακραία —φαρδιά— υπνοδωμάτια τον
+    # φτάνουν από νότο). Ελαχιστοποιεί το μήκος του διαδρόμου.
+    compact = bool(beds) and len(svc) >= 2 and cd > 0.05 and Wn > 6.0
+    if compact:
+        hall_req = next((r for r in svc if r.category == Category.HALL), None)
+        others = sorted([r for r in svc if r is not hall_req],
+                        key=lambda r: -r.target_area)
+        left_req = hall_req or others.pop(0)
+        right_req = others.pop(0) if others else None
+        mid_reqs = others
+        wl = _clamp(left_req.target_area / full_depth, left_req.min_width, 0.30 * Wn)
+        wr = (_clamp(right_req.target_area / full_depth, right_req.min_width,
+                     0.30 * Wn) if right_req else 0.0)
+        Xc0 = te + wl + ti
+        Xc1 = Wn - te - (wr + ti if right_req else 0.0)
+        if Xc1 - Xc0 < 1.4:
+            compact = False
+
+    if compact:
+        left_rooms = _place_row([left_req], 0.0, Xc0, y_svc0, y_bed0, te, ti,
+                                {"s": False, "n": False, "w": True, "e": False}, False)
+        right_rooms = (_place_row([right_req], Xc1, Wn, y_svc0, y_bed0, te, ti,
+                       {"s": False, "n": False, "w": False, "e": True}, False)
+                       if right_req else [])
+        mid_rooms = (_place_row(mid_reqs, Xc0, Xc1, y_svc0, y_svc1, te, ti,
+                     {"s": False, "n": False, "w": False, "e": False}, mirror)
+                     if mid_reqs else [])
+        svc_rooms = left_rooms + mid_rooms + right_rooms
+        rooms += svc_rooms
+        corridor = Room(Category.CORRIDOR, "Διάδρομος", Xc0 + ti / 2.0,
+                        y_cor0 + ti / 2.0, Xc1 - ti / 2.0, y_cor1 - ti / 2.0)
+        rooms.append(corridor)
+    else:
+        # Εφεδρική διάταξη: διάδρομος πλήρους πλάτους ζώνης νύχτας
+        if svc:
+            svc_rooms = _place_row(svc, 0.0, Wn, y_svc0, y_svc1, te, ti,
+                                   {"s": False, "n": False, "w": True, "e": True},
+                                   mirror)
+            rooms += svc_rooms
+        if (bed_rooms or svc_rooms) and cd > 0.05 and Wn - 2 * te > 0.3:
+            corridor = Room(Category.CORRIDOR, "Διάδρομος", te, y_cor0 + ti / 2.0,
+                            Wn - te, y_cor1 - ti / 2.0)
             rooms.append(corridor)
 
     plan.rooms = rooms
@@ -291,6 +322,41 @@ def _outline(W: float, H: float, Wn: float, Hd: float,
 
 
 # ─────────────────────────────── Ανοίγματα ───────────────────────────────────
+
+def _corridor_door(room: Room, corr: Room, ti: float, dw: float,
+                   back: float = 0.10) -> None:
+    """Τοποθετεί θύρα στην πλευρά του χώρου που εφάπτεται στον διάδρομο.
+
+    Η θύρα μπαίνει `back` (=0,10 m) πίσω από τον διαχωριστικό τοίχο και όσο πιο
+    κοντά γίνεται στο κέντρο του διαδρόμου (ελαχιστοποίηση χρήσιμου μήκους).
+    """
+    tol = ti * 1.8
+    side = None
+    lo = hi = 0.0          # διαθέσιμο τμήμα επικάλυψης (σε συντ. πλευράς)
+    ccx, ccy = corr.cx, corr.cy
+    # οριζόντια επικάλυψη (για θύρες N/S), κατακόρυφη (για E/W)
+    ox0, ox1 = max(room.x0, corr.x0), min(room.x1, corr.x1)
+    oy0, oy1 = max(room.y0, corr.y0), min(room.y1, corr.y1)
+    if abs(room.y0 - corr.y1) < tol and ox1 - ox0 > 0.3:          # διάδρ. νότια
+        side, lo, hi, target = "S", ox0 - room.x0, ox1 - room.x0, ccx - room.x0
+    elif abs(room.y1 - corr.y0) < tol and ox1 - ox0 > 0.3:        # διάδρ. βόρεια
+        side, lo, hi, target = "N", ox0 - room.x0, ox1 - room.x0, ccx - room.x0
+    elif abs(room.x1 - corr.x0) < tol and oy1 - oy0 > 0.3:        # διάδρ. ανατ.
+        side, lo, hi, target = "E", oy0 - room.y0, oy1 - room.y0, ccy - room.y0
+    elif abs(room.x0 - corr.x1) < tol and oy1 - oy0 > 0.3:        # διάδρ. δυτ.
+        side, lo, hi, target = "W", oy0 - room.y0, oy1 - room.y0, ccy - room.y0
+    if side is None:
+        return
+    seglen = _side_length(room, side)
+    w = min(dw, hi - lo - 2 * back, seglen - 2 * back)
+    if w <= 0.2:
+        w = min(dw, seglen - 0.2)
+    # ομαδοποίηση προς το κέντρο του διαδρόμου, με 0,10 m από τον τοίχο
+    ideal = target - w / 2.0
+    offset = min(max(ideal, lo + back), hi - back - w)
+    offset = min(max(offset, back), seglen - back - w)
+    room.openings.append(Opening("door", side, offset, w))
+
 
 def _assign_openings(plan: FloorPlan, spec: BuildingSpec, corridor: Optional[Room],
                      day_rooms: List[Room], bed_rooms: List[Room],
@@ -321,18 +387,19 @@ def _assign_openings(plan: FloorPlan, spec: BuildingSpec, corridor: Optional[Roo
         off = (a.d - w) / 2.0
         a.openings.append(Opening("opening", "E", off, w))
 
-    # Θύρες προς τον διάδρομο
-    for room in bed_rooms:
-        _add_door(room, "S", door_w.get(room.category, 0.90))     # προς διάδρομο (νότια)
-    for room in svc_rooms:
-        _add_door(room, "N", door_w.get(room.category, 0.90))     # προς διάδρομο (βόρεια)
+    # Θύρες προς τον διάδρομο: στην πλευρά κάθε χώρου που εφάπτεται στον
+    # διάδρομο, τοποθετημένες 0,10 m πίσω από τον διαχωριστικό τοίχο (αίτημα
+    # χρήστη) και ομαδοποιημένες προς το κέντρο του διαδρόμου.
+    if corridor is not None:
+        for room in bed_rooms + svc_rooms:
+            _corridor_door(room, corridor, plan.int_wall,
+                           door_w.get(room.category, 0.90))
 
     # Σύνδεση ζώνης ημέρας ↔ διαδρόμου μέσω του χωλ (θύρα και στη νότια πλευρά)
     hall = next((r for r in svc_rooms if r.category == Category.HALL), None)
     if hall is not None:
         _add_door(hall, "S", 0.90)
     elif day_rooms and svc_rooms:
-        # χωρίς χωλ: πέρασμα από τον πρώτο βοηθητικό προς τη ζώνη ημέρας
         _add_door(svc_rooms[0], "S", 0.90)
 
     # Θύρα εισόδου στην όψη του ζητούμενου προσανατολισμού

@@ -109,6 +109,36 @@ def test_corridor_is_minimized():
                 f"Διάδρομος {corr:.1f} m² > 16% του καθαρού"
 
 
+def test_boundary_sides_marked_exterior():
+    # κάθε πλευρά χώρου που βλέπει στο εξωτερικό (εκτός περιγράμματος) πρέπει να
+    # είναι σημειωμένη ως εξωτερική → σχεδιάζεται με παχύ τοίχο (te).
+    for p in generate_proposals(_spec()):
+        fl = p.floors[0]
+        d = fl.ext_wall + fl.int_wall + 0.05
+        cells = fl.cells
+
+        def inside(x, y):
+            return any(cx0 - 1e-6 <= x <= cx1 + 1e-6 and cy0 - 1e-6 <= y <= cy1 + 1e-6
+                       for (cx0, cy0, cx1, cy1) in cells)
+
+        for r in fl.rooms:
+            if r.category == Category.CORRIDOR:
+                continue
+            for side, px, py in (("N", r.cx, r.y1 + d), ("S", r.cx, r.y0 - d),
+                                 ("E", r.x1 + d, r.cy), ("W", r.x0 - d, r.cy)):
+                if not inside(px, py):        # δεν υπάρχει κτίριο πέρα → περίγραμμα
+                    assert side in r.ext_sides, f"{r.name}:{side} λεπτός εξωτ. τοίχος"
+
+
+def test_corridor_compact():
+    # ο συμπαγής διάδρομος να μην φτάνει το πλήρες πλάτος της ζώνης νύχτας
+    p = generate_proposals(_spec())[0]
+    fl = p.floors[0]
+    corr = next((r for r in fl.rooms if r.category == Category.CORRIDOR), None)
+    assert corr is not None
+    assert corr.w < fl.width_ew - 2.0, "Ο διάδρομος δεν ελαχιστοποιήθηκε"
+
+
 def test_compliance_runs():
     p = generate_proposals(_spec())[0]
     rows = check_floor(p.floors[0])
