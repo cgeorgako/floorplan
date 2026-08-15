@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Αποτελέσματα — {{ spec.project_name }}</title>
+<style>
+  :root{--bg:#0f1720;--panel:#16212e;--line:#26333f;--ink:#e8eef4;
+    --muted:#9fb0bf;--accent:#e8833a;--teal:#2fb6a8;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;line-height:1.45}
+  header{background:linear-gradient(180deg,#1a2735,#111b26);
+    border-bottom:2px solid var(--accent);padding:18px 24px}
+  header h1{margin:0;font-size:19px}
+  header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+  main{max-width:1080px;margin:22px auto;padding:0 18px 60px}
+  .bar{display:flex;justify-content:space-between;align-items:center;gap:14px;
+    flex-wrap:wrap;margin-bottom:18px}
+  .btn{display:inline-block;background:var(--accent);color:#1b1205;text-decoration:none;
+    border-radius:8px;padding:11px 20px;font-weight:700;font-size:14px}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn.teal{background:var(--teal);color:#04231f}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;margin-bottom:18px}
+  .card h2{margin:0 0 4px;font-size:16px}
+  .meta{color:var(--muted);font-size:13px;margin-bottom:12px}
+  .previews{display:flex;flex-wrap:wrap;gap:14px}
+  .previews a{flex:1 1 320px;border:1px solid var(--line);border-radius:8px;
+    overflow:hidden;background:#fff}
+  .previews img{width:100%;display:block}
+  .links{display:flex;gap:12px;margin-top:14px;flex-wrap:wrap}
+  .warn{margin-top:12px;background:#3a2a17;border:1px solid #6d5326;border-radius:8px;
+    padding:10px 12px;font-size:12.5px;color:#ffe6c2}
+  .warn b{color:#ffcf99}
+  ul{margin:6px 0 0;padding-left:18px}
+</style>
+</head>
+<body>
+<header>
+  <h1>{{ spec.project_name }} — {{ results|length }} προτάσεις κατόψεων</h1>
+  <p>Περίγραμμα (μέγ.) {{ '%.2f'|format(spec.max_width_ew) }}×{{ '%.2f'|format(spec.max_length_ns) }} m
+     · {{ shape }} · Είσοδος: {{ spec.entrance.gr }} · Όροφοι: {{ spec.floors }}
+     · Υ/Δ: {{ spec.bedrooms }} · Λουτρά: {{ spec.baths }} · WC: {{ spec.wcs }}</p>
+</header>
+<main>
+  <div class="bar">
+    <a class="btn ghost" href="{{ url_for('index') }}">← Νέα αναζήτηση</a>
+    <a class="btn teal" href="{{ all_pdf }}">⬇ Ενιαίο PDF (όλες οι προτάσεις)</a>
+  </div>
+
+  {% for r in results %}
+  <div class="card">
+    <h2>{{ r.title }}</h2>
+    <div class="meta">
+      {% for fl in r.floors %}{{ fl.label }}: μικτό {{ fl.gross }} m² · καθαρό {{ fl.net }} m²{% if not loop.last %} &nbsp;|&nbsp; {% endif %}{% endfor %}
+    </div>
+    {% if r.previews %}
+    <div class="previews">
+      {% for pv in r.previews %}<a href="{{ pv }}" target="_blank"><img src="{{ pv }}" alt="κάτοψη"></a>{% endfor %}
+    </div>
+    {% endif %}
+    <div class="links">
+      <a class="btn" href="{{ r.pdf }}">⬇ PDF (σε κλίμακα)</a>
+      <a class="btn teal" href="{{ r.dxf }}">⬇ DXF (R12)</a>
+    </div>
+    {% if r.warnings %}
+    <div class="warn"><b>Παρατηρήσεις:</b>
+      <ul>{% for w in r.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <p class="meta">Σχηματικές προτάσεις προμελέτης βάσει instructions.md. Δεσμευτικοί
+    μόνο οι έλεγχοι ύψους/φωτισμού/αερισμού· απαιτείται έλεγχος ΣΔ/κάλυψης/ύψους/Δ-δ
+    πριν την αδειοδότηση.</p>
+</main>
+</body>
+</html>

@@ -82,6 +82,21 @@ python3 -m pip install -r requirements.txt
 
 ## Χρήση
 
+### Web εφαρμογή (φόρμα στον browser)
+
+Αρχική σελίδα HTML: συμπληρώνεις τα δεδομένα, πατάς «Δημιουργία» και τρέχει
+αυτόματα η Python γεννήτρια, με προεπισκόπηση και συνδέσμους λήψης PDF/DXF.
+
+```bash
+python -m pip install -r requirements.txt      # περιλαμβάνει Flask & PyMuPDF
+python -m webapp.app                            # ή: python webapp/app.py
+# άνοιξε http://127.0.0.1:5000
+```
+
+Τα αρχεία κάθε εκτέλεσης αποθηκεύονται προσωρινά στο `webapp/static/out/<id>/`.
+
+### Γραμμή εντολών
+
 **Διαδραστικά** (ερωτήσεις στα ελληνικά):
 
 ```bash
@@ -150,10 +165,13 @@ floorplan/
 ├── examples/example_config.json
 ├── assets/DejaVuSans*.ttf      Γραμματοσειρές (ελληνικά για PDF)
 ├── tests/test_smoke.py
+├── webapp/                     Web εφαρμογή (Flask)
+│   ├── app.py                  Server: φόρμα → γεννήτρια → PDF/DXF
+│   └── templates/              index.html (φόρμα) · results.html (αποτελέσματα)
 └── floorplan_gen/
     ├── models.py               Δομές δεδομένων (BuildingSpec, Room, FloorPlan…)
     ├── program.py              Κτιριολογικό πρόγραμμα από τα δεδομένα
-    ├── layout.py               Μηχανή ζωνικής διάταξης (squarified treemap)
+    ├── layout.py               Μηχανή ζωνικής διάταξης (Γ-σχήμα, συμπαγής διάδρομος)
     ├── compliance.py           Έλεγχοι φωτισμού/αερισμού (Κ.Κ. αρ. 20/21)
     ├── dxf_writer.py           Έξοδος DXF R12
     ├── pdf_writer.py           Έξοδος PDF (ReportLab)
