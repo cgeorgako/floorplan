@@ -114,8 +114,13 @@ def _draw_floor_page(c: canvas.Canvas, plan: FloorPlan, prop: Proposal) -> None:
         c.setStrokeGray(0.15)
         c.rect(mx(room.x0), my(room.y0), room.w * k, room.d * k, stroke=1, fill=1)
 
-    # 2β) εξωτερικό περίγραμμα (πολύγωνο) — έντονη γραμμή
+    # Σημ.: οι εξωτερικοί τοίχοι εμφανίζονται αυτόματα με πάχος te, καθώς κάθε
+    # χώρος τοποθετείται εσωτερικά κατά te στις εξωτερικές πλευρές (βλ. layout),
+    # ενώ το τμήμα εξωτερικού τοίχου που βρίσκεται εσωτερικά του περιγράμματος
+    # (π.χ. σε εσοχή Γ/Τ) σημειώνεται ως εσωτερικό → πάχος ti (βλ. _place_row).
     outline = plan.outline or [(0, 0), (W, 0), (W, L), (0, L)]
+
+    # 2β) εξωτερικό περίγραμμα (πολύγωνο) — έντονη γραμμή
     c.setStrokeGray(0.0)
     c.setLineWidth(1.4)
     p = c.beginPath()
@@ -190,6 +195,8 @@ def _endpoints(room: Room, op) -> Tuple[Tuple[float, float], Tuple[float, float]
 
 
 def _label_room(c, room: Room, plan: FloorPlan, mx, my, k) -> None:
+    if not room.name:                       # τμήμα συνέχειας (π.χ. προέκταση διαδρ.)
+        return
     if room.category == Category.CORRIDOR and room.area < 1.5:
         return
     cx, cy = mx(room.cx), my(room.cy)

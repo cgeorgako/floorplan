@@ -72,10 +72,10 @@ def _service_reqs(spec: BuildingSpec, include_hall: bool = True) -> List[RoomReq
     if spec.has_wardrobe:
         reqs.append(RoomReq(Category.WARDROBE, "Βεστιάριο", target_area=2.5,
                             min_width=1.00, zone="N", priority=6))
-    # Χώρος υποδοχής (χωλ) — προαιρετικός (1,20×1,50 ελάχ., Α.5)
+    # Χώρος υποδοχής (χωλ) — προαιρετικός· μέγιστο ΠΛΑΤΟΣ 1,30 μ. (αίτημα χρήστη)
     if include_hall:
-        reqs.append(RoomReq(Category.HALL, "Χωλ", target_area=3.0, min_width=1.20,
-                            zone="N", priority=1))
+        reqs.append(RoomReq(Category.HALL, "Χωλ", target_area=2.4, min_width=1.10,
+                            zone="N", priority=1, max_side=1.30))
     return reqs
 
 

@@ -40,23 +40,30 @@ def _side_length(room: Room, side: str) -> float:
     return room.w if side in ("N", "S") else room.d
 
 
+# Ελεύθερη απόσταση ανοίγματος από κάθετο (διαχωριστικό) τοίχο — κανένα άνοιγμα
+# δεν «πέφτει» πάνω σε κάθετο τοίχο.
+_OPEN_CLR = 0.12
+
+
 def _add_window(room: Room, side: str) -> None:
     seglen = _side_length(room, side)
     need = max(0.9, 0.10 * room.area / 1.40)      # για υαλοπίνακα ≥10% (ύψος ~1,40)
-    width = min(max(need, 0.9), seglen - 0.6)
+    width = min(max(need, 0.9), seglen - 2 * _OPEN_CLR)
     if width <= 0.3:
         return
-    offset = (seglen - width) / 2.0
+    offset = (seglen - width) / 2.0               # κεντραρισμένο → μακριά από γωνίες
     room.openings.append(Opening("window", side, offset, width, to_exterior=True))
 
 
 def _add_door(room: Room, side: str, width: float = 0.90, kind: str = "door",
               exterior: bool = False) -> None:
     seglen = _side_length(room, side)
-    w = min(width, seglen - 0.3)
+    w = min(width, seglen - 2 * _OPEN_CLR)
     if w <= 0.2:
         return
     offset = (seglen - w) / 2.0
+    # εξασφάλισε ελεύθερη απόσταση ≥ _OPEN_CLR από τους κάθετους τοίχους
+    offset = min(max(offset, _OPEN_CLR), seglen - _OPEN_CLR - w)
     room.openings.append(Opening(kind, side, offset, w, to_exterior=exterior))
 
 
@@ -127,9 +134,13 @@ def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
         es = set()
         if ext.get("s"):
             es.add("S")
-        if ext.get("n") or (night_x is not None and (rx0 < night_x[0] - 0.05
-                            or rx1 > night_x[1] + 0.05)):
-            es.add("N")   # ο χώρος βγαίνει εκτός πτέρυγας νύχτας → βόρεια όψη εξωτ.
+        # Βόρεια όψη εξωτερική εκτός αν ο χώρος βρίσκεται ΕΞ ΟΛΟΚΛΗΡΟΥ κάτω από την
+        # πτέρυγα νύχτας. Αν «πατάει» έστω και εν μέρει στην εσοχή (Γ/Τ), η βόρεια
+        # όψη βλέπει στο ύπαιθρο → εξωτερικός τοίχος (te). Μόνο όταν καλύπτεται
+        # πλήρως από την πτέρυγα παραμένει εσωτερική (ti).
+        if ext.get("n") or (night_x is not None and not (
+                night_x[0] - 0.05 <= rx0 and rx1 <= night_x[1] + 0.05)):
+            es.add("N")
         if ext.get("w") and idx == 0:
             es.add("W")
         if ext.get("e") and idx == n - 1:
@@ -300,8 +311,9 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
     full_depth = Hs + cd
     # ΣΥΜΠΑΓΗΣ ΔΙΑΔΡΟΜΟΣ: δύο βοηθητικοί χώροι πλήρους βάθους στις γωνίες, ο
     # διάδρομος μόνο στο κεντρικό τμήμα (τα ακραία —φαρδιά— υπνοδωμάτια τον
-    # φτάνουν από νότο). Ελαχιστοποιεί το μήκος του διαδρόμου.
-    compact = bool(beds) and len(svc) >= 2 and cd > 0.05 and Wn > 6.0
+    # φτάνουν από νότο). Απαιτεί ≥3 βοηθητικούς (2 γωνίες + ≥1 κεντρικό) ώστε να
+    # ΜΗΝ μένει κενή (γκρι) ζώνη στο κέντρο· αλλιώς πλήρης διάταξη (fallback).
+    compact = bool(beds) and len(svc) >= 3 and cd > 0.05 and Wn > 6.0
     if compact:
         # Οι δύο ΓΩΝΙΑΚΟΙ χώροι (αριστερά/δεξιά) έχουν εξωτερική όψη (Δ/Α) → φως.
         # Προτεραιότητα στα ΛΟΥΤΡΑ (πάντα εξωτ. φως), μετά WC (αν μένει θέση).
@@ -353,6 +365,15 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
         corridor = Room(Category.CORRIDOR, "Διάδρομος", Xc0 + ti / 2.0,
                         y_cor0 + ti / 2.0, Xc1 - ti / 2.0, y_cor1 - ti / 2.0)
         rooms.append(corridor)
+        # Αν οι κεντρικοί βοηθητικοί (με μέγιστες διαστάσεις) ΔΕΝ γεμίζουν τη ζώνη
+        # τους, ΜΗΝ αφήνεις γκρι νεκρή ζώνη: προέκτεινε τον διάδρομο (λευκή
+        # κυκλοφορία) προς τα κάτω στο κενό, δεξιά των βοηθητικών.
+        xm = max((r.x1 for r in mid_rooms), default=Xc0)
+        gap_x0 = xm + ti / 2.0
+        if (Xc1 - ti / 2.0) - gap_x0 > 0.4:
+            fill = Room(Category.CORRIDOR, "", gap_x0, y_svc0 + ti / 2.0,
+                        Xc1 - ti / 2.0, y_cor0 + ti / 2.0)
+            rooms.append(fill)
     else:
         # Εφεδρική διάταξη: διάδρομος πλήρους πλάτους ζώνης νύχτας. Τα λουτρά
         # τοποθετούνται στα άκρα (εξωτ. Δ/Α όψη → φυσικό φως).
@@ -531,6 +552,60 @@ def _assign_openings(plan: FloorPlan, spec: BuildingSpec, corridor: Optional[Roo
             Category.HALL, Category.LIVING, Category.SALON)), None)
         if target and target.ext_sides:
             _add_door(target, sorted(target.ext_sides)[0], 1.00, exterior=True)
+
+    # ── Έλεγχος προσβασιμότητας: ΚΑΘΕ χώρος πρέπει να έχει επικοινωνία (θύρα/
+    # άνοιγμα). Όσοι έμειναν χωρίς άνοιγμα αποκτούν θύρα προς γειτονικό χώρο (ή,
+    # ως έσχατη λύση, εξωτερική θύρα).
+    _ensure_access(plan)
+
+
+def _shared_wall(a: Room, b: Room, ti: float) -> Optional[Tuple[str, float, float]]:
+    """Επιστρέφει (πλευρά του a, lo, hi) του κοινού διαχωριστικού τοίχου a↔b, ή
+    None αν δεν εφάπτονται σε επαρκές μήκος (≥0,60 μ.)."""
+    tol = ti * 1.8 + 1e-6
+    ox0, ox1 = max(a.x0, b.x0), min(a.x1, b.x1)
+    oy0, oy1 = max(a.y0, b.y0), min(a.y1, b.y1)
+    if abs(a.y1 - b.y0) < tol and ox1 - ox0 > 0.6:      # b βόρεια του a
+        return "N", ox0 - a.x0, ox1 - a.x0
+    if abs(a.y0 - b.y1) < tol and ox1 - ox0 > 0.6:      # b νότια του a
+        return "S", ox0 - a.x0, ox1 - a.x0
+    if abs(a.x1 - b.x0) < tol and oy1 - oy0 > 0.6:      # b ανατολικά του a
+        return "E", oy0 - a.y0, oy1 - a.y0
+    if abs(a.x0 - b.x1) < tol and oy1 - oy0 > 0.6:      # b δυτικά του a
+        return "W", oy0 - a.y0, oy1 - a.y0
+    return None
+
+
+def _ensure_access(plan: FloorPlan) -> None:
+    """Εγγυάται ότι κάθε χώρος (πλην κλίμακας) έχει τουλάχιστον ένα άνοιγμα."""
+    ti = plan.int_wall
+    for room in plan.rooms:
+        if room.category == Category.STAIRS or room.openings:
+            continue
+        # 1) θύρα προς τον πλησιέστερο γειτονικό εσωτερικό χώρο
+        placed = False
+        others = [r for r in plan.rooms if r is not room
+                  and r.category != Category.STAIRS]
+        others.sort(key=lambda r: abs(r.cx - room.cx) + abs(r.cy - room.cy))
+        for other in others:
+            sw = _shared_wall(room, other, ti)
+            if sw is None:
+                continue
+            side, lo, hi = sw
+            seglen = _side_length(room, side)
+            dw = 0.80 if room.category in (Category.BATH, Category.WC) else 0.90
+            w = min(dw, hi - lo - 0.20, seglen - 0.20)
+            if w <= 0.2:
+                continue
+            offset = min(max((lo + hi) / 2.0 - w / 2.0, lo + 0.10),
+                         hi - 0.10 - w)
+            offset = min(max(offset, 0.10), seglen - 0.10 - w)
+            room.openings.append(Opening("door", side, offset, w))
+            placed = True
+            break
+        # 2) έσχατη λύση: εξωτερική θύρα σε διαθέσιμη εξωτερική πλευρά
+        if not placed and room.ext_sides:
+            _add_door(room, sorted(room.ext_sides)[0], 0.90, exterior=True)
 
 
 # ─────────────────────────── Μικτές διαστάσεις χώρου ──────────────────────────
