@@ -1,0 +1,82 @@
+[
+  {
+    "id": "a1b2c3d4-e001-4001-b001-000000000001",
+    "position": 1,
+    "filepath": "src/pages/slides/Slide01Title.tsx",
+    "title": "Τίτλος",
+    "description": "Γεννήτρια Κατόψεων — Τεχνικό Γραφείο Μελετών",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-e002-4001-b001-000000000002",
+    "position": 2,
+    "filepath": "src/pages/slides/Slide02WhatIs.tsx",
+    "title": "Τι Είναι",
+    "description": "Περιγραφή εφαρμογής και εξαγόμενα αρχεία",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-e003-4001-b001-000000000003",
+    "position": 3,
+    "filepath": "src/pages/slides/Slide03Problem.tsx",
+    "title": "Πρόβλημα & Λύση",
+    "description": "Πριν και μετά τη χρήση της εφαρμογής",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-e004-4001-b001-000000000004",
+    "position": 4,
+    "filepath": "src/pages/slides/Slide04Inputs.tsx",
+    "title": "Παράμετροι Εισόδου",
+    "description": "Τα στοιχεία που συμπληρώνει ο μελετητής",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-e005-4001-b001-000000000005",
+    "position": 5,
+    "filepath": "src/pages/slides/Slide05Workflow.tsx",
+    "title": "Ροή Εργασίας",
+    "description": "Φόρμα → Γεννήτρια → Εξαγωγή",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-e006-4001-b001-000000000006",
+    "position": 6,
+    "filepath": "src/pages/slides/Slide06Rules.tsx",
+    "title": "Κανόνες Σχεδιασμού",
+    "description": "Βιοκλιματικές αρχές και ζωνοποίηση χώρων",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-e007-4001-b001-000000000007",
+    "position": 7,
+    "filepath": "src/pages/slides/Slide07Outputs.tsx",
+    "title": "Αρχεία Εξόδου",
+    "description": "PDF, DXF και ZIP — τι παραδίδεται σε κάθε εκτέλεση",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-e008-4001-b001-000000000008",
+    "position": 8,
+    "filepath": "src/pages/slides/Slide08Technologies.tsx",
+    "title": "Τεχνολογίες",
+    "description": "Open-source Python stack — χωρίς εξαρτήσεις SaaS",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-e009-4001-b001-000000000009",
+    "position": 9,
+    "filepath": "src/pages/slides/Slide09Constraints.tsx",
+    "title": "Περιορισμοί & Σημειώσεις",
+    "description": "Τι δεν καλύπτει η παρούσα έκδοση",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-e010-4001-b001-000000000010",
+    "position": 10,
+    "filepath": "src/pages/slides/Slide10Contact.tsx",
+    "title": "Επόμενα Βήματα",
+    "description": "Επικοινωνία και πρόσκληση για συνεργασία",
+    "speakerNotes": ""
+  }
+]
