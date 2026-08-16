@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Αποτελέσματα — {{ spec.project_name }}</title>
+<style>
+  :root{--bg:#0f1720;--panel:#16212e;--line:#26333f;--ink:#e8eef4;
+    --muted:#9fb0bf;--accent:#e8833a;--teal:#2fb6a8;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;line-height:1.45}
+  header{background:linear-gradient(180deg,#1a2735,#111b26);
+    border-bottom:2px solid var(--accent);padding:18px 24px}
+  header h1{margin:0;font-size:19px}
+  header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+  main{max-width:1080px;margin:22px auto;padding:0 18px 60px}
+  .bar{display:flex;justify-content:space-between;align-items:center;gap:14px;
+    flex-wrap:wrap;margin-bottom:18px}
+  .btn{display:inline-block;background:var(--accent);color:#1b1205;text-decoration:none;
+    border-radius:8px;padding:11px 20px;font-weight:700;font-size:14px}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn.teal{background:var(--teal);color:#04231f}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;margin-bottom:18px}
+  .card h2{margin:0 0 4px;font-size:16px}
+  .meta{color:var(--muted);font-size:13px;margin-bottom:12px}
+  .previews{display:flex;flex-wrap:wrap;gap:14px}
+  .preview-wrap{flex:1 1 320px;min-height:200px;border:1px solid var(--line);border-radius:8px;
+    overflow:hidden;background:#fff;position:relative;cursor:pointer}
+  .preview-wrap canvas{width:100%;display:block}
+  .preview-label{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);
+    color:#fff;font-size:11px;text-align:center;padding:3px 0}
+  .preview-error{display:none;position:absolute;inset:0;background:#1e2c3a;
+    color:var(--muted);font-size:13px;flex-direction:column;align-items:center;
+    justify-content:center;gap:10px;text-align:center;padding:16px}
+  .preview-error.visible{display:flex}
+  .preview-error svg{opacity:.45}
+  .preview-error a,.preview-error button{color:var(--accent);font-size:13px;
+    text-decoration:none;background:none;border:none;cursor:pointer;padding:0}
+  .preview-error a:hover,.preview-error button:hover{text-decoration:underline}
+  .links{display:flex;gap:12px;margin-top:14px;flex-wrap:wrap}
+  .warn{margin-top:12px;background:#3a2a17;border:1px solid #6d5326;border-radius:8px;
+    padding:10px 12px;font-size:12.5px;color:#ffe6c2}
+  .warn b{color:#ffcf99}
+  ul{margin:6px 0 0;padding-left:18px}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module" id="pdfjs-script"
+  data-pdfworker="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs"></script>
+</head>
+<body>
+<header>
+  <h1>{{ spec.project_name }} — {{ results|length }} προτάσεις κατόψεων</h1>
+  <p>Περίγραμμα (μέγ.) {{ '%.2f'|format(spec.max_width_ew) }}×{{ '%.2f'|format(spec.max_length_ns) }} m
+     · {{ shape }} · Είσοδος: {{ spec.entrance.gr }} · Όροφοι: {{ spec.floors }}
+     · Υ/Δ: {{ spec.bedrooms }} · Λουτρά: {{ spec.baths }} · WC: {{ spec.wcs }}</p>
+</header>
+<main>
+  <div class="bar">
+    <a class="btn ghost" href="{{ url_for('index') }}">← Νέα αναζήτηση</a>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a class="btn teal" href="{{ all_pdf }}">⬇ Ενιαίο PDF (όλες οι προτάσεις)</a>
+      <a class="btn" href="{{ zip_url }}">⬇ Λήψη όλων (ZIP)</a>
+    </div>
+  </div>
+
+  {% for r in results %}
+  <div class="card">
+    <h2>{{ r.title }}</h2>
+    <div class="meta">
+      {% for fl in r.floors %}{{ fl.label }}: μικτό {{ fl.gross }} m² · καθαρό {{ fl.net }} m²{% if not loop.last %} &nbsp;|&nbsp; {% endif %}{% endfor %}
+    </div>
+    {% if r.previews %}
+    <div class="previews">
+      {% for pv in r.previews %}
+      <div class="preview-wrap" data-pdf="{{ pv.pdf_url }}" data-page="{{ pv.page }}"
+           data-download="{{ r.pdf }}" onclick="window.open('{{ r.pdf }}','_blank')">
+        <canvas></canvas>
+        <div class="preview-error" aria-live="polite">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/>
+          </svg>
+          <span>Η προεπισκόπηση δεν φορτώθηκε</span>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center">
+            <button class="retry-btn" onclick="event.stopPropagation();retryPreview(this.closest('.preview-wrap'))">↺ Επανάληψη</button>
+            <a onclick="event.stopPropagation()" href="{{ r.pdf }}">⬇ Λήψη PDF</a>
+          </div>
+        </div>
+        <span class="preview-label">{{ pv.label }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="links">
+      <a class="btn" href="{{ r.pdf }}">⬇ PDF (σε κλίμακα)</a>
+      <a class="btn teal" href="{{ r.dxf }}">⬇ DXF (R12)</a>
+    </div>
+    {% if r.warnings %}
+    <div class="warn"><b>Παρατηρήσεις:</b>
+      <ul>{% for w in r.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <p class="meta">Σχηματικές προτάσεις προμελέτης βάσει instructions.md. Δεσμευτικοί
+    μόνο οι έλεγχοι ύψους/φωτισμού/αερισμού· απαιτείται έλεγχος ΣΔ/κάλυψης/ύψους/Δ-δ
+    πριν την αδειοδότηση.</p>
+</main>
+<script type="module">
+  const pdfjsScript = document.getElementById('pdfjs-script');
+  const workerSrc = pdfjsScript.dataset.pdfworker;
+
+  // Dynamically import the ES-module build of PDF.js
+  const { getDocument, GlobalWorkerOptions } = await import(pdfjsScript.src);
+  GlobalWorkerOptions.workerSrc = workerSrc;
+
+  // Cache open PDF documents so multiple floors of the same PDF share one fetch
+  const docCache = {};
+
+  async function getDoc(url) {
+    if (!docCache[url]) {
+      // Store the Promise immediately so parallel callers share one fetch
+      docCache[url] = getDocument(url).promise;
+    }
+    return docCache[url];
+  }
+
+  function showError(wrap) {
+    wrap.querySelector('.preview-error').classList.add('visible');
+  }
+
+  function hideError(wrap) {
+    wrap.querySelector('.preview-error').classList.remove('visible');
+  }
+
+  async function renderPreview(wrap) {
+    const pdfUrl = wrap.dataset.pdf;
+    const pageNum = parseInt(wrap.dataset.page, 10) + 1; // PDF.js uses 1-based pages
+    const canvas = wrap.querySelector('canvas');
+    try {
+      // Remove cached failed document so a retry fetches fresh
+      if (docCache[pdfUrl] && await docCache[pdfUrl].catch(() => null) === null) {
+        delete docCache[pdfUrl];
+      }
+      const pdf = await getDoc(pdfUrl);
+      const page = await pdf.getPage(Math.min(pageNum, pdf.numPages));
+      // Scale to fit container width (~640px logical, 2× for retina)
+      const viewport = page.getViewport({ scale: 1 });
+      const scale = (canvas.parentElement.clientWidth || 640) / viewport.width * window.devicePixelRatio;
+      const scaled = page.getViewport({ scale });
+      canvas.width = scaled.width;
+      canvas.height = scaled.height;
+      canvas.style.width = '100%';
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport: scaled }).promise;
+      hideError(wrap);
+    } catch (err) {
+      console.warn('PDF preview failed for', pdfUrl, err);
+      // Remove broken promise from cache so a future retry re-fetches
+      delete docCache[pdfUrl];
+      showError(wrap);
+    }
+  }
+
+  // Expose retry handler globally so the inline onclick can reach it
+  window.retryPreview = function(wrap) {
+    // Bust the document cache for this URL so getDoc re-fetches
+    const pdfUrl = wrap.dataset.pdf;
+    delete docCache[pdfUrl];
+    renderPreview(wrap);
+  };
+
+  // Render all previews in parallel
+  const wraps = document.querySelectorAll('.preview-wrap');
+  await Promise.all(Array.from(wraps).map(renderPreview));
+</script>
+</body>
+</html>
