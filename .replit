@@ -4,6 +4,11 @@ modules = ["nodejs-24", "python-3.12"]
 router = "application"
 deploymentTarget = "autoscale"
 
+[deployment.run]
+# Fallback run command required by the Republish pre-flight validator.
+# In production the artifact services (artifact.toml) take over and this is not executed.
+args = ["bash", "-c", "pip install -r requirements.txt --quiet && exec gunicorn --bind=0.0.0.0:5000 webapp.app:app"]
+
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
