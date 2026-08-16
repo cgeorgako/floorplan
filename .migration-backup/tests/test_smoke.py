@@ -172,6 +172,46 @@ def test_bathroom_always_has_exterior_light():
                         assert r.ext_sides, f"{shape}/{r.name}: λουτρό χωρίς εξωτ. όψη"
 
 
+def _roomy(**kw):
+    base = dict(max_length_ns=11.0, max_total_area=150.0)
+    base.update(kw)
+    return _spec(**base)
+
+
+def test_salon_min_dimension_350():
+    for p in generate_proposals(_roomy()):
+        for fl in p.floors:
+            for r in fl.rooms:
+                if r.category == Category.SALON:
+                    assert min(r.w, r.d) >= 3.50 - 0.05, f"{r.name} {r.w}×{r.d}"
+
+
+def test_master_min_dimension_350():
+    for p in generate_proposals(_roomy()):
+        for fl in p.floors:
+            for r in fl.rooms:
+                if r.category == Category.BEDROOM_MASTER:
+                    assert min(r.w, r.d) >= 3.50 - 0.05, f"{r.name} {r.w}×{r.d}"
+
+
+def test_storage_max_dimension_200():
+    for p in generate_proposals(_roomy(has_storage=True)):
+        for fl in p.floors:
+            for r in fl.rooms:
+                if r.category == Category.STORAGE:
+                    assert max(r.w, r.d) <= 2.00 + 0.03, f"{r.name} {r.w}×{r.d}"
+
+
+def test_salon_prioritised_over_kitchen():
+    # (γ) μεγιστοποίηση σαλονιού → σαλόνι φαρδύτερο/μεγαλύτερο από κουζίνα
+    for p in generate_proposals(_roomy()):
+        fl = p.floors[0]
+        salon = next((r for r in fl.rooms if r.category == Category.SALON), None)
+        kit = next((r for r in fl.rooms if r.category == Category.KITCHEN), None)
+        if salon and kit:
+            assert salon.w >= kit.w - 0.01, "Το σαλόνι πρέπει να είναι φαρδύτερο από την κουζίνα"
+
+
 def test_compliance_runs():
     p = generate_proposals(_spec())[0]
     rows = check_floor(p.floors[0])

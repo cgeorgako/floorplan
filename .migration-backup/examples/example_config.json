@@ -3,7 +3,7 @@
   "client": "—",
   "location": "Αμαλιάδα, Π.Ε. Ηλείας",
   "max_width_ew": 13.0,
-  "max_length_ns": 10.0,
+  "max_length_ns": 11.0,
   "entrance": "Ν",
   "floors": 1,
   "ext_wall": 0.30,
@@ -18,7 +18,7 @@
   "has_salon": true,
   "has_big_kitchen": true,
   "min_bedroom_side": 3.0,
-  "max_total_area": 130.0,
+  "max_total_area": 145.0,
   "num_proposals": 3,
   "footprint_shape": "polygonal"
 }

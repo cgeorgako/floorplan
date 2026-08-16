@@ -62,34 +62,43 @@ def _add_door(room: Room, side: str, width: float = 0.90, kind: str = "door",
 
 # ─────────────────────────── Τοποθέτηση σειράς χώρων ──────────────────────────
 
-def _fit_widths(areas: List[float], mins: List[float], avail: float) -> List[float]:
-    """Πλάτη ∝ εμβαδά, με τήρηση ελαχίστων (best-effort) και άθροισμα = avail."""
+def _fit_widths(areas: List[float], mins: List[float], avail: float,
+                weights: Optional[List[float]] = None,
+                maxes: Optional[List[Optional[float]]] = None) -> List[float]:
+    """Πλάτη = ελάχιστο + κατανομή πλεονάζοντος κατά `weights` (προεπιλογή:
+    ανάλογα με το εμβαδόν). Τηρούνται ελάχιστα και (προαιρετικά) μέγιστα (max_side).
+    """
     n = len(areas)
     if n == 0:
         return []
-    tot = sum(areas) or 1.0
-    w = [avail * a / tot for a in areas]
-    if sum(mins) > avail + 1e-6:
+    if sum(mins) > avail + 1e-6:              # δεν χωρούν ούτε τα ελάχιστα
         s = avail / sum(mins)
         return [m * s for m in mins]
-    locked = [False] * n
-    for _ in range(n + 2):
-        deficit = 0.0
-        free = 0.0
-        for i in range(n):
-            if not locked[i] and w[i] < mins[i]:
-                deficit += mins[i] - w[i]
-                w[i] = mins[i]
-                locked[i] = True
-        for i in range(n):
-            if not locked[i]:
-                free += w[i]
-        if deficit <= 1e-9 or free <= 1e-9:
-            break
-        for i in range(n):
-            if not locked[i]:
-                w[i] -= deficit * (w[i] / free)
-    return w
+    w = weights if weights else areas
+    w = [max(1e-6, v) for v in w]
+    extra = avail - sum(mins)
+    sw = sum(w)
+    widths = [mins[i] + extra * w[i] / sw for i in range(n)]
+    # εφαρμογή μέγιστων πλευρών (π.χ. αποθήκη ≤ 2,00 μ.): cap & ανακατανομή
+    if maxes and any(m is not None for m in maxes):
+        capped = [False] * n
+        for _ in range(n + 2):
+            excess = 0.0
+            for i in range(n):
+                if (maxes[i] is not None and not capped[i]
+                        and widths[i] > maxes[i] + 1e-9):
+                    excess += widths[i] - maxes[i]
+                    widths[i] = maxes[i]
+                    capped[i] = True
+            if excess <= 1e-9:
+                break
+            fw = sum(w[i] for i in range(n) if not capped[i])
+            if fw <= 1e-9:
+                break
+            for i in range(n):
+                if not capped[i]:
+                    widths[i] += excess * w[i] / fw
+    return widths
 
 
 def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
@@ -108,7 +117,9 @@ def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
     if avail <= 0:
         avail = max(0.1, (X1 - X0) - lw - rw)
     widths = _fit_widths([r.target_area for r in ordered],
-                         [r.min_width for r in ordered], avail)
+                         [r.min_width for r in ordered], avail,
+                         weights=[r.grow * r.target_area for r in ordered],
+                         maxes=[r.max_side for r in ordered])
     rooms: List[Room] = []
     x = X0 + lw
     for idx, (r, w) in enumerate(zip(ordered, widths)):
@@ -161,45 +172,58 @@ def _geometry(spec: BuildingSpec, program: List[RoomReq], shape: str,
     # ελάχιστο καθαρό πλάτος διαδρόμου ≥ MIN_CORRIDOR (cd = clear + ti)
     cd = MIN_CORRIDOR + ti + (0.0, 0.10, 0.05)[variant % 3]
 
-    # Βάθος ζώνης ημέρας· 0 αν δεν υπάρχουν χώροι ημέρας (όροφος υπνοδωματίων)
-    if day:
-        Hd = _clamp(day_area / W, 3.2, 4.7) * (1.0, 1.05, 0.95)[variant % 3]
-    else:
-        Hd = 0.0
+    has_salon = any(r.category == Category.SALON for r in day)
+    has_storage = any(r.category == Category.STORAGE for r in svc)
+    allow = te + ti / 2.0                 # ανοχή τοίχων: καθαρή = μικτή − allow
+    # Στόχοι ΒΑΘΟΥΣ (καθαρή διάσταση + ανοχή): σαλόνι & master ≥ 3,50 μ.
+    day_min_d = (3.50 if has_salon else 3.20) + allow
+    bed_min_d = max(ms, 3.50) + allow
+    day_floor = (3.00 + allow) if day else 0.0    # απόλυτο κατώφλι βάθους ημέρας
 
-    # ελάχιστο πλάτος ζώνης νύχτας ώστε ΟΛΑ τα υπνοδωμάτια να τηρούν την ελάχ.
-    # πλευρά (χρησιμοποιείται το πραγματικό min_width κάθε υ/δ — το master ζητά 3,20)
+    Hd = max(_clamp(day_area / W, day_min_d, 4.9 + allow)
+             * (1.0, 1.05, 0.95)[variant % 3], day_min_d) if day else 0.0
+
+    # ελάχ. πλάτος ζώνης νύχτας ώστε ΟΛΑ τα υπνοδωμάτια να τηρούν την ελάχ. πλευρά
     bed_fit = sum(max(r.min_width, ms) for r in beds) + (nb - 1) * ti + 2 * te
     if poly and day:
-        Wn = _clamp(bed_fit + 0.5, 0.55 * W, W)
-        Wn *= (1.0, 0.9, 1.05)[variant % 3]
+        Wn = _clamp(bed_fit + 0.5, 0.55 * W, W) * (1.0, 0.9, 1.05)[variant % 3]
         Wn = _clamp(max(Wn, bed_fit), 0.5 * W, W)
     else:
         Wn = W
 
     bed_w_each = max(ms, (Wn - (nb - 1) * ti - 2 * te) / nb)
-    Hb = _clamp(bed_area / (nb * bed_w_each), ms, 4.7)
-    Hs = _clamp(svc_area / max(Wn - 2 * te, 1.0), 1.6, 3.2)
+    Hb = max(_clamp(bed_area / (nb * bed_w_each), bed_min_d, 4.9 + allow), bed_min_d)
+    hs_max = (2.0 + ti) if has_storage else 3.2   # αποθήκη ≤2,00 μ. καθαρό βάθος
+    Hs = _clamp(svc_area / max(Wn - 2 * te, 1.0), 1.6, hs_max)
 
     if force_H:
-        # επιβολή ύψους (συνέπεια με άλλον όροφο): προσαρμογή βάθους υπνοδωματίων
         H = force_H
-        Hb = max(ms, H - Hd - Hs - cd)
+        Hb = max(bed_min_d, H - Hd - Hs - cd)
     else:
         H = Hd + Hs + cd + Hb
         if H > spec.max_length_ns:
-            scale = (spec.max_length_ns - cd) / max(H - cd, 0.1)
-            Hd, Hs, Hb = Hd * scale, Hs * scale, Hb * scale
+            # ΠΡΟΤΕΡΑΙΟΤΗΤΑ: (α) υπνοδωμάτια → (β) διάδρομος → (γ) σαλόνι/καθιστικό.
+            # Μειώνουμε πρώτα το βάθος ημέρας (γ), μετά βοηθητικούς, τελευταία υ/δ.
+            over = H - spec.max_length_ns
+            for lo, key in (("Hd", day_floor), ("Hs", 1.5), ("Hb", 3.00 + allow)):
+                val = {"Hd": Hd, "Hs": Hs, "Hb": Hb}[lo]
+                cut = min(over, max(val - key, 0.0))
+                if lo == "Hd":
+                    Hd -= cut
+                elif lo == "Hs":
+                    Hs -= cut
+                else:
+                    Hb -= cut
+                over -= cut
+                if over <= 1e-6:
+                    break
             H = Hd + Hs + cd + Hb
 
-    area = W * Hd + Wn * (Hs + cd + Hb)
-    if area > spec.max_total_area and not force_H:
-        s = math.sqrt(spec.max_total_area / area)
-        W, Wn, Hd, Hs, Hb = W * s, Wn * s, Hd * s, Hs * s, Hb * s
-        H = Hd + Hs + cd + Hb
-
-    # Εγγύηση ελάχιστης πλευράς υπνοδωματίων: η ζώνη νύχτας δεν πέφτει κάτω από
-    # το bed_fit (τυχόν μικρή υπέρβαση του μέγιστου εμβαδού είναι προτιμότερη).
+    # Μέγιστο εμβαδόν: μείωση ΠΛΑΤΟΥΣ (διατηρεί τα βάθη → προτεραιότητες αναλλοίωτες)
+    gross = W * Hd + Wn * (Hs + cd + Hb)
+    if gross > spec.max_total_area and not force_H and gross > 0:
+        f = spec.max_total_area / gross
+        W, Wn = W * f, Wn * f
     Wn = min(W, max(Wn, bed_fit))
 
     # Θέση πτέρυγας νύχτας (Xn) → τύπος περιγράμματος
@@ -286,6 +310,8 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
         baths = [r for r in svc if r.category == Category.BATH]
         wcs = [r for r in svc if r.category == Category.WC]
         dry = [r for r in svc if r.category not in (Category.BATH, Category.WC)]
+        # η αποθήκη (max 2,00 μ.) ΔΕΝ πάει σε γωνία πλήρους βάθους → τελευταία
+        dry.sort(key=lambda r: 1 if r.category == Category.STORAGE else 0)
         light_pri = baths + wcs                 # όσοι θέλουν εξωτ. φως (λουτρά πρώτα)
         corner = light_pri[:2]
         extra_light = light_pri[2:]             # πέραν των 2 γωνιών → κέντρο (εσωτ.)
@@ -360,16 +386,27 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
 
     # Παρατηρήσεις ελάχιστης πλευράς υπνοδωματίων
     for r in bed_rooms:
-        if min(r.w, r.d) < spec.min_bedroom_side - 0.05:
+        thr = 3.50 if r.category == Category.BEDROOM_MASTER else spec.min_bedroom_side
+        if min(r.w, r.d) < thr - 0.05:
             warnings.append(
                 f"{r.name}: {r.w:.2f}×{r.d:.2f} m — ελάχιστη πλευρά κάτω από "
-                f"{spec.min_bedroom_side:.2f} m (στενό περίγραμμα).")
-    # Το λουτρό πρέπει ΠΑΝΤΑ να έχει εξωτερικό φυσικό φωτισμό
+                f"{thr:.2f} m (στενό περίγραμμα).")
+    # Σαλόνι: ελάχιστη διάσταση 3,50 μ.
+    for r in day_rooms:
+        if r.category == Category.SALON and min(r.w, r.d) < 3.50 - 0.05:
+            warnings.append(
+                f"Σαλόνι: {r.w:.2f}×{r.d:.2f} m — ελάχ. διάσταση κάτω από 3,50 m· "
+                f"αυξήστε το μήκος (Β–Ν) του περιγράμματος.")
     for r in svc_rooms:
+        # Το λουτρό πρέπει ΠΑΝΤΑ να έχει εξωτερικό φυσικό φωτισμό
         if r.category == Category.BATH and not r.ext_sides:
             warnings.append(
                 f"{r.name}: χωρίς εξωτερικό άνοιγμα — απαιτείται αναδιάταξη ώστε "
                 f"να αποκτήσει φυσικό φωτισμό.")
+        # Αποθήκη ≤ 2,00 μ. σε κάθε κατεύθυνση
+        if r.category == Category.STORAGE and max(r.w, r.d) > 2.02:
+            warnings.append(
+                f"Αποθήκη: {r.w:.2f}×{r.d:.2f} m — υπερβαίνει το μέγιστο 2,00 m.")
     return plan, warnings
 
 

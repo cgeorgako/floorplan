@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from .models import BuildingSpec, Category
 
@@ -28,17 +28,20 @@ class RoomReq:
     min_width: float     # ελάχιστη καθαρή πλευρά (m)
     zone: str            # 'S' | 'N' | 'E' | 'W' | 'C'
     priority: int = 5    # 1 = υψηλή (τοποθετείται πρώτο)
+    max_side: Optional[float] = None  # μέγιστη καθαρή πλευρά (m), αν υπάρχει
+    grow: float = 1.0    # βάρος κατανομής πλεονάζοντος πλάτους (μεγαλύτερο = μεγαλώνει)
 
 
 def _bedroom_reqs(spec: BuildingSpec) -> List[RoomReq]:
     """Δημιουργεί τις απαιτήσεις υπνοδωματίων (1 κύριο + δευτερεύοντα)."""
     reqs: List[RoomReq] = []
     ms = spec.min_bedroom_side
-    # Κύριο υπνοδωμάτιο — Νότος/ΝΑ, πλάτος ≥ max(min side, 3,20) (Α.1.3)
-    master_w = max(ms, 3.20)
+    # Κύριο υπνοδωμάτιο — ελάχιστη πλευρά 3,50 μ. (αίτημα χρήστη)
+    master_w = max(ms, 3.50)
     reqs.append(RoomReq(
         Category.BEDROOM_MASTER, "Κύριο Υπνοδωμάτιο",
-        target_area=max(14.0, master_w * ms), min_width=master_w, zone="S", priority=2,
+        target_area=max(14.0, master_w * 3.50), min_width=master_w, zone="S",
+        priority=2,
     ))
     # Δευτερεύοντα υπνοδωμάτια — Ανατολή/ΒΑ, πλάτος ≥ min side (≥3,00 όπως ζητά ο χρήστης)
     for i in range(spec.bedrooms - 1):
@@ -63,8 +66,9 @@ def _service_reqs(spec: BuildingSpec, include_hall: bool = True) -> List[RoomReq
         reqs.append(RoomReq(Category.WC, name, target_area=1.90, min_width=1.10,
                             zone="N", priority=4))
     if spec.has_storage:
+        # Οικιακή αποθήκη — μέγιστη διάσταση 2,00 μ. σε κάθε κατεύθυνση (αίτημα)
         reqs.append(RoomReq(Category.STORAGE, "Αποθήκη", target_area=3.0,
-                            min_width=1.20, zone="N", priority=6))
+                            min_width=1.20, zone="N", priority=8, max_side=2.00))
     if spec.has_wardrobe:
         reqs.append(RoomReq(Category.WARDROBE, "Βεστιάριο", target_area=2.5,
                             min_width=1.00, zone="N", priority=6))
@@ -78,21 +82,25 @@ def _service_reqs(spec: BuildingSpec, include_hall: bool = True) -> List[RoomReq
 def _day_reqs(spec: BuildingSpec) -> List[RoomReq]:
     """Χώροι ημέρας: καθιστικό, σαλόνι, κουζίνα (νότια/ανατολική ζώνη)."""
     reqs: List[RoomReq] = []
+    # Προτεραιότητα (γ): μεγιστοποίηση σαλονιού (πάντα) & καθιστικού (grow μεγάλο).
+    # Το πλεονάζον πλάτος της νότιας βάσης δίνεται κατά προτεραιότητα στο σαλόνι,
+    # μετά στο καθιστικό· η κουζίνα μένει κοντά στο ελάχιστο (μπορεί να έχει
+    # διαφορετικό —μικρότερο— πλάτος από το σαλόνι).
     if spec.has_living:
-        # Καθιστικό 16–18 m², πλάτος ≥3,20 (§2.2 / Α.4)
         reqs.append(RoomReq(Category.LIVING, "Καθιστικό", target_area=18.0,
-                            min_width=3.20, zone="S", priority=2))
+                            min_width=3.20, zone="S", priority=2, grow=2.0))
     if spec.has_salon:
-        reqs.append(RoomReq(Category.SALON, "Σαλόνι", target_area=16.0,
-                            min_width=3.20, zone="S", priority=3))
+        # Σαλόνι — ελάχιστη πλευρά 3,50 μ. (αίτημα χρήστη)
+        reqs.append(RoomReq(Category.SALON, "Σαλόνι", target_area=18.0,
+                            min_width=3.50, zone="S", priority=3, grow=3.0))
     if spec.has_big_kitchen:
         # Μεγάλη κουζίνα (με τραπεζαρία) — σχήμα Π/νησίδα, πλάτος ≥2,80 (Α.3.5)
-        reqs.append(RoomReq(Category.KITCHEN, "Κουζίνα", target_area=12.0,
-                            min_width=2.80, zone="E", priority=3))
+        reqs.append(RoomReq(Category.KITCHEN, "Κουζίνα", target_area=11.0,
+                            min_width=2.80, zone="E", priority=3, grow=0.4))
     else:
         # Απλή κουζίνα 6–8 m², γωνιακή L πλάτος ≥2,20
         reqs.append(RoomReq(Category.KITCHEN, "Κουζίνα", target_area=8.0,
-                            min_width=2.20, zone="E", priority=3))
+                            min_width=2.20, zone="E", priority=3, grow=0.4))
     return reqs
 
 
