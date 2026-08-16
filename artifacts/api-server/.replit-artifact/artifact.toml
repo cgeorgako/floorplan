@@ -7,7 +7,7 @@ id = "3B4_FFSkEVBkAeYMFRJ2e"
 [[services]]
 localPort = 8080
 name = "API Server"
-paths = ["/api", "/"]
+paths = ["/api"]
 
 [services.development]
 run = "pnpm --filter @workspace/api-server run dev"
@@ -30,3 +30,21 @@ NODE_ENV = "production"
 
 [services.production.health.startup]
 path = "/api/healthz"
+
+[[services]]
+localPort = 5000
+name = "Flask App"
+paths = ["/"]
+
+[services.development]
+# "Start application" workflow already owns port 5000 in dev; just sleep so
+# the artifact proxy can route to it without spawning a second gunicorn.
+run = "sleep infinity"
+
+[services.production]
+
+[services.production.run]
+args = ["bash", "-c", "cd /home/runner/workspace && pip install -r requirements.txt --quiet && exec gunicorn --bind=0.0.0.0:5000 webapp.app:app"]
+
+[services.production.health.startup]
+path = "/"
