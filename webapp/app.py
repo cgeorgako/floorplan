@@ -4,12 +4,18 @@
 παραγωγή PDF (σε κλίμακα) + DXF (R12) → σελίδα αποτελεσμάτων με προεπισκόπηση
 και συνδέσμους λήψης.
 
+Τα παραγόμενα αρχεία αποθηκεύονται στο Replit Object Storage ώστε να επιβιώνουν
+επανεκκινήσεις του container.  Κατά την εξυπηρέτηση, ελέγχεται πρώτα η τοπική
+προσωρινή μνήμη (webapp/static/out/) και αν λείπει το αρχείο κατεβαίνει αυτόματα
+από το Object Storage.
+
 Εκτέλεση:
     python -m webapp.app         (ή)   python webapp/app.py
     → άνοιξε http://127.0.0.1:5000
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import uuid
@@ -33,6 +39,63 @@ try:
     _HAS_PYMUPDF = True
 except Exception:                        # pragma: no cover
     _HAS_PYMUPDF = False
+
+# ── Replit Object Storage (persistent across restarts) ──────────────────────
+try:
+    from replit.object_storage import Client as _ObjClient
+    _storage = _ObjClient()
+    _HAS_OBJECT_STORAGE = True
+except Exception:                        # pragma: no cover
+    _storage = None
+    _HAS_OBJECT_STORAGE = False
+
+_log = logging.getLogger(__name__)
+
+
+def _storage_key(run_id: str, filename: str) -> str:
+    """Κλειδί αντικειμένου στο Object Storage."""
+    return f"out/{run_id}/{filename}"
+
+
+def _upload_to_storage(local_path: str, run_id: str, filename: str) -> None:
+    """Ανεβάζει ένα τοπικό αρχείο στο Object Storage (αθόρυβα αν αποτύχει)."""
+    if not _HAS_OBJECT_STORAGE:
+        return
+    try:
+        with open(local_path, "rb") as fh:
+            _storage.upload_from_bytes(
+                _storage_key(run_id, filename), fh.read()
+            )
+    except Exception as exc:             # pragma: no cover
+        _log.warning("Object Storage upload failed for %s/%s: %s",
+                     run_id, filename, exc)
+
+
+def _ensure_local(run_id: str, filename: str) -> bool:
+    """Εξασφαλίζει ότι υπάρχει τοπικό αντίγραφο (κατεβάζει αν χρειαστεί).
+
+    Επιστρέφει True αν το αρχείο είναι διαθέσιμο τοπικά.
+    """
+    run_dir = os.path.join(OUT_ROOT, run_id)
+    local_path = os.path.join(run_dir, filename)
+
+    if os.path.isfile(local_path):
+        return True
+
+    if not _HAS_OBJECT_STORAGE:
+        return False
+
+    try:
+        data = _storage.download_as_bytes(_storage_key(run_id, filename))
+        os.makedirs(run_dir, exist_ok=True)
+        with open(local_path, "wb") as fh:
+            fh.write(data)
+        return True
+    except Exception as exc:
+        _log.warning("Object Storage download failed for %s/%s: %s",
+                     run_id, filename, exc)
+        return False
+
 
 app = Flask(__name__)
 OUT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "out")
@@ -113,6 +176,8 @@ def generate():
         dxf_name = f"{base}_protasi_{prop.index}.dxf"
         write_proposal_pdf(prop, os.path.join(run_dir, pdf_name))
         write_proposal_dxf(prop, os.path.join(run_dir, dxf_name))
+        _upload_to_storage(os.path.join(run_dir, pdf_name), run_id, pdf_name)
+        _upload_to_storage(os.path.join(run_dir, dxf_name), run_id, dxf_name)
 
         previews = []
         if _HAS_PYMUPDF:
@@ -121,6 +186,7 @@ def generate():
                 for pi in range(min(len(prop.floors), doc.page_count)):
                     png = f"{base}_p{prop.index}_pg{pi}.png"
                     doc[pi].get_pixmap(dpi=110).save(os.path.join(run_dir, png))
+                    _upload_to_storage(os.path.join(run_dir, png), run_id, png)
                     previews.append(url_for("serve_file", run_id=run_id, filename=png))
                 doc.close()
             except Exception:
@@ -140,6 +206,7 @@ def generate():
 
     all_name = f"{base}_ola.pdf"
     write_all_pdf(proposals, os.path.join(run_dir, all_name))
+    _upload_to_storage(os.path.join(run_dir, all_name), run_id, all_name)
     all_pdf = url_for("download_file", run_id=run_id, filename=all_name)
 
     return render_template("results.html", spec=spec, results=results,
@@ -149,20 +216,27 @@ def generate():
 
 @app.route("/file/<run_id>/<path:filename>")
 def serve_file(run_id: str, filename: str):
-    """Εμφάνιση αρχείου inline (π.χ. προεπισκόπηση PNG)."""
-    safe = os.path.join(OUT_ROOT, run_id)
-    if not os.path.isdir(safe):
+    """Εμφάνιση αρχείου inline (π.χ. προεπισκόπηση PNG).
+
+    Αν το αρχείο δεν υπάρχει τοπικά (π.χ. μετά επανεκκίνηση), το κατεβάζει
+    αυτόματα από το Object Storage πριν το σερβίρει.
+    """
+    if not _ensure_local(run_id, filename):
         abort(404)
-    return send_from_directory(safe, filename)
+    return send_from_directory(os.path.join(OUT_ROOT, run_id), filename)
 
 
 @app.route("/download/<run_id>/<path:filename>")
 def download_file(run_id: str, filename: str):
-    """Λήψη αρχείου (PDF/DXF) ως attachment."""
-    safe = os.path.join(OUT_ROOT, run_id)
-    if not os.path.isdir(safe):
+    """Λήψη αρχείου (PDF/DXF) ως attachment.
+
+    Αν το αρχείο δεν υπάρχει τοπικά (π.χ. μετά επανεκκίνηση), το κατεβάζει
+    αυτόματα από το Object Storage πριν το σερβίρει.
+    """
+    if not _ensure_local(run_id, filename):
         abort(404)
-    return send_from_directory(safe, filename, as_attachment=True)
+    return send_from_directory(os.path.join(OUT_ROOT, run_id), filename,
+                               as_attachment=True)
 
 
 if __name__ == "__main__":
