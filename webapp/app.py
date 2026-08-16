@@ -15,13 +15,16 @@
 """
 from __future__ import annotations
 
+import io
+import json
 import logging
 import os
 import sys
 import uuid
+import zipfile
 
 from flask import (Flask, abort, render_template, request,
-                   send_from_directory, url_for)
+                   send_file, send_from_directory, url_for)
 
 # εξασφάλισε ότι το πακέτο floorplan_gen είναι στο path (root του repo)
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -201,8 +204,24 @@ def generate():
     _upload_to_storage(os.path.join(run_dir, all_name), run_id, all_name)
     all_pdf = url_for("download_file", run_id=run_id, filename=all_name)
 
+    # Write and upload a manifest so the /zip route can reconstruct the file
+    # list after a container restart (when local files are gone).
+    zip_filenames = (
+        [f"{base}_protasi_{p.index}.pdf" for p in proposals]
+        + [f"{base}_protasi_{p.index}.dxf" for p in proposals]
+        + [all_name]
+    )
+    manifest_name = "manifest.json"
+    manifest_path = os.path.join(run_dir, manifest_name)
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        json.dump({"files": zip_filenames}, fh)
+    _upload_to_storage(manifest_path, run_id, manifest_name)
+
+    zip_url = url_for("download_zip", run_id=run_id)
+
     return render_template("results.html", spec=spec, results=results,
-                           all_pdf=all_pdf, shape=("Πολυγωνικό (Γ)"
+                           all_pdf=all_pdf, zip_url=zip_url,
+                           shape=("Πολυγωνικό (Γ)"
                            if spec.is_polygonal else "Ορθογώνιο"))
 
 
@@ -216,6 +235,39 @@ def serve_file(run_id: str, filename: str):
     if not _ensure_local(run_id, filename):
         abort(404)
     return send_from_directory(os.path.join(OUT_ROOT, run_id), filename)
+
+
+@app.route("/zip/<run_id>")
+def download_zip(run_id: str):
+    """Δημιουργεί και επιστρέφει ένα ZIP με όλα τα αρχεία μιας εκτέλεσης.
+
+    Διαβάζει το manifest.json για να ξέρει ποια αρχεία υπάρχουν και τα
+    κατεβάζει από το Object Storage αν χρειαστεί.
+    """
+    if not _ensure_local(run_id, "manifest.json"):
+        abort(404)
+
+    manifest_path = os.path.join(OUT_ROOT, run_id, "manifest.json")
+    try:
+        with open(manifest_path, encoding="utf-8") as fh:
+            filenames = json.load(fh).get("files", [])
+    except Exception:
+        abort(404)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname in filenames:
+            if _ensure_local(run_id, fname):
+                zf.write(os.path.join(OUT_ROOT, run_id, fname), fname)
+    buf.seek(0)
+
+    zip_filename = f"proposals_{run_id[:8]}.zip"
+    return send_file(
+        buf,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=zip_filename,
+    )
 
 
 @app.route("/download/<run_id>/<path:filename>")

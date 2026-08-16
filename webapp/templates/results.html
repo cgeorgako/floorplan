@@ -50,7 +50,10 @@
 <main>
   <div class="bar">
     <a class="btn ghost" href="{{ url_for('index') }}">← Νέα αναζήτηση</a>
-    <a class="btn teal" href="{{ all_pdf }}">⬇ Ενιαίο PDF (όλες οι προτάσεις)</a>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a class="btn teal" href="{{ all_pdf }}">⬇ Ενιαίο PDF (όλες οι προτάσεις)</a>
+      <a class="btn" href="{{ zip_url }}">⬇ Λήψη όλων (ZIP)</a>
+    </div>
   </div>
 
   {% for r in results %}
