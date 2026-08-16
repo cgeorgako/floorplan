@@ -1,5 +1,5 @@
 kind = "api"
-previewPath = "/api" # TODO - should be excluded from preview in the first place
+previewPath = "/api"
 title = "API Server"
 version = "1.0.0"
 id = "3B4_FFSkEVBkAeYMFRJ2e"
@@ -7,7 +7,7 @@ id = "3B4_FFSkEVBkAeYMFRJ2e"
 [[services]]
 localPort = 8080
 name = "API Server"
-paths = ["/api"]
+paths = ["/api", "/"]
 
 [services.development]
 run = "pnpm --filter @workspace/api-server run dev"
@@ -30,11 +30,3 @@ NODE_ENV = "production"
 
 [services.production.health.startup]
 path = "/api/healthz"
-
-[[services]]
-localPort = 5000
-name = "Flask App"
-paths = ["/"]
-
-[services.development]
-run = "cd /home/runner/workspace && pip install -r requirements.txt --quiet && gunicorn --bind=0.0.0.0:5000 --reuse-port webapp.app:app"
