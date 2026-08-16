@@ -77,6 +77,7 @@ def spec_from_form() -> BuildingSpec:
         wcs=_i("wcs", 1),
         has_storage=_b("has_storage"),
         has_wardrobe=_b("has_wardrobe"),
+        has_hall=_b("has_hall"),
         has_living=_b("has_living"),
         has_salon=_b("has_salon"),
         has_big_kitchen=_b("has_big_kitchen"),

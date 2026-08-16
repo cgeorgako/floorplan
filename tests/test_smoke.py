@@ -150,6 +150,28 @@ def test_corridor_compact():
     assert corr.w < fl.width_ew - 2.0, "Ο διάδρομος δεν ελαχιστοποιήθηκε"
 
 
+def test_hall_optional_and_varies():
+    # has_hall=True → ο χωλ ΔΕΝ εμφανίζεται σε όλες τις λύσεις
+    props = generate_proposals(_spec(has_hall=True, num_proposals=3))
+    has = [any(r.category == Category.HALL for r in p.floors[0].rooms)
+           for p in props]
+    assert any(has) and not all(has), "Ο χωλ πρέπει να μπαίνει σε μερικές μόνο λύσεις"
+    # has_hall=False → πουθενά χωλ
+    props2 = generate_proposals(_spec(has_hall=False, num_proposals=3))
+    assert not any(any(r.category == Category.HALL for r in p.floors[0].rooms)
+                   for p in props2)
+
+
+def test_bathroom_always_has_exterior_light():
+    # Το λουτρό πρέπει ΠΑΝΤΑ να έχει εξωτερική όψη (φυσικό φως), σε κάθε σχήμα
+    for shape in ("auto", "L", "T", "rectangular"):
+        for p in generate_proposals(_spec(footprint_shape=shape, num_proposals=3)):
+            for fl in p.floors:
+                for r in fl.rooms:
+                    if r.category == Category.BATH:
+                        assert r.ext_sides, f"{shape}/{r.name}: λουτρό χωρίς εξωτ. όψη"
+
+
 def test_compliance_runs():
     p = generate_proposals(_spec())[0]
     rows = check_floor(p.floors[0])

@@ -49,8 +49,8 @@ def _bedroom_reqs(spec: BuildingSpec) -> List[RoomReq]:
     return reqs
 
 
-def _service_reqs(spec: BuildingSpec) -> List[RoomReq]:
-    """Λουτρά, WC, αποθήκη, βεστιάριο, είσοδος (βοηθητικοί / βόρεια ζώνη)."""
+def _service_reqs(spec: BuildingSpec, include_hall: bool = True) -> List[RoomReq]:
+    """Λουτρά, WC, αποθήκη, βεστιάριο, (προαιρετικά) χωλ — βοηθητικοί/βόρεια ζώνη."""
     reqs: List[RoomReq] = []
     for i in range(spec.baths):
         name = "Λουτρό" if spec.baths == 1 else f"Λουτρό {i + 1}"
@@ -68,9 +68,10 @@ def _service_reqs(spec: BuildingSpec) -> List[RoomReq]:
     if spec.has_wardrobe:
         reqs.append(RoomReq(Category.WARDROBE, "Βεστιάριο", target_area=2.5,
                             min_width=1.00, zone="N", priority=6))
-    # Χώρος υποδοχής (χωλ) — 1,20×1,50 ελάχ. (Α.5)
-    reqs.append(RoomReq(Category.HALL, "Χωλ", target_area=3.0, min_width=1.20,
-                        zone="N", priority=1))
+    # Χώρος υποδοχής (χωλ) — προαιρετικός (1,20×1,50 ελάχ., Α.5)
+    if include_hall:
+        reqs.append(RoomReq(Category.HALL, "Χωλ", target_area=3.0, min_width=1.20,
+                            zone="N", priority=1))
     return reqs
 
 
@@ -101,15 +102,17 @@ def _stairs_req() -> RoomReq:
                    min_width=2.20, zone="N", priority=1)
 
 
-def build_program(spec: BuildingSpec) -> List[List[RoomReq]]:
+def build_program(spec: BuildingSpec,
+                  include_hall: bool = True) -> List[List[RoomReq]]:
     """Επιστρέφει λίστα προγραμμάτων — μία ανά όροφο.
 
     Ισόγειο (1 όροφος): ένα ενιαίο πρόγραμμα.
     Διώροφο (2 όροφοι): ζώνη ημέρας κάτω, ζώνη νύχτας πάνω (Α.6.2).
+    `include_hall`: αν ο χώρος υποδοχής (χωλ) περιλαμβάνεται στη συγκεκριμένη λύση.
     """
     day = _day_reqs(spec)
     beds = _bedroom_reqs(spec)
-    service = _service_reqs(spec)
+    service = _service_reqs(spec, include_hall)
 
     if spec.floors == 1:
         program = day + beds + service

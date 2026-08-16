@@ -31,6 +31,7 @@ def spec_from_dict(d: Dict[str, Any]) -> BuildingSpec:
         wcs=int(d.get("wcs", 0)),
         has_storage=bool(d.get("has_storage", False)),
         has_wardrobe=bool(d.get("has_wardrobe", False)),
+        has_hall=bool(d.get("has_hall", True)),
         has_living=bool(d.get("has_living", True)),
         has_salon=bool(d.get("has_salon", False)),
         has_big_kitchen=bool(d.get("has_big_kitchen", False)),
@@ -94,6 +95,7 @@ def interactive_spec() -> BuildingSpec:
     wcs = _ask_int("Πλήθος WC", 1)
     storage = _ask_bool("Οικιακή αποθήκη;", True)
     wardrobe = _ask_bool("Χώρος βεστιαρίου;", False)
+    hall = _ask_bool("Χώρος υποδοχής (χωλ) — προαιρετικός, όχι σε όλες τις λύσεις;", True)
     living = _ask_bool("Καθιστικό;", True)
     salon = _ask_bool("Σαλόνι;", True)
     big_kitchen = _ask_bool("Μεγάλη κουζίνα;", True)
@@ -107,7 +109,7 @@ def interactive_spec() -> BuildingSpec:
         wcs=wcs, has_storage=storage, has_wardrobe=wardrobe, has_living=living,
         has_salon=salon, has_big_kitchen=big_kitchen, min_bedroom_side=min_side,
         max_total_area=max_area, num_proposals=n, footprint_shape=shape,
-        project_name=name,
+        has_hall=hall, project_name=name,
     )
 
 

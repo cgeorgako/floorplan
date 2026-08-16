@@ -13,6 +13,7 @@
   "wcs": 1,
   "has_storage": true,
   "has_wardrobe": false,
+  "has_hall": true,
   "has_living": true,
   "has_salon": true,
   "has_big_kitchen": true,

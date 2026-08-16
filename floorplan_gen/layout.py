@@ -279,18 +279,38 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
     # φτάνουν από νότο). Ελαχιστοποιεί το μήκος του διαδρόμου.
     compact = bool(beds) and len(svc) >= 2 and cd > 0.05 and Wn > 6.0
     if compact:
-        hall_req = next((r for r in svc if r.category == Category.HALL), None)
-        others = sorted([r for r in svc if r is not hall_req],
-                        key=lambda r: -r.target_area)
-        left_req = hall_req or others.pop(0)
-        right_req = others.pop(0) if others else None
-        mid_reqs = others
-        wl = _clamp(left_req.target_area / full_depth, left_req.min_width, 0.30 * Wn)
+        # Οι δύο ΓΩΝΙΑΚΟΙ χώροι (αριστερά/δεξιά) έχουν εξωτερική όψη (Δ/Α) → φως.
+        # Προτεραιότητα στα ΛΟΥΤΡΑ (πάντα εξωτ. φως), μετά WC (αν μένει θέση).
+        # Ο χωλ & οι στεγνοί χώροι πάνε στο ΚΕΝΤΡΟ (μεταβλητή θέση) — ο χωλ δεν
+        # κολλάει πάντα στην άκρη του καθιστικού/σαλονιού.
+        baths = [r for r in svc if r.category == Category.BATH]
+        wcs = [r for r in svc if r.category == Category.WC]
+        dry = [r for r in svc if r.category not in (Category.BATH, Category.WC)]
+        light_pri = baths + wcs                 # όσοι θέλουν εξωτ. φως (λουτρά πρώτα)
+        corner = light_pri[:2]
+        extra_light = light_pri[2:]             # πέραν των 2 γωνιών → κέντρο (εσωτ.)
+        # αν λείπουν «φωτεινοί» για τις 2 γωνίες, συμπλήρωσε με στεγνούς
+        di = 0
+        while len(corner) < 2 and di < len(dry):
+            corner.append(dry[di]); di += 1
+        dry_mid = dry[di:]
+        # μεταβλητή θέση χωλ/στεγνών στο κέντρο ανά πρόταση
+        mid_reqs = extra_light + dry_mid
+        if mid_reqs:
+            k = variant % len(mid_reqs)
+            mid_reqs = mid_reqs[k:] + mid_reqs[:k]
+        # ποια γωνία αριστερά/δεξιά (εναλλαγή ανά πρόταση για ποικιλία θέσης)
+        if len(corner) == 2 and variant % 2:
+            corner = [corner[1], corner[0]]
+        left_req = corner[0] if corner else None
+        right_req = corner[1] if len(corner) > 1 else None
+        wl = (_clamp(left_req.target_area / full_depth, left_req.min_width,
+                     0.30 * Wn) if left_req else 0.0)
         wr = (_clamp(right_req.target_area / full_depth, right_req.min_width,
                      0.30 * Wn) if right_req else 0.0)
-        Xc0 = nx0 + te + wl + ti
+        Xc0 = nx0 + te + (wl + ti if left_req else 0.0)
         Xc1 = nx1 - te - (wr + ti if right_req else 0.0)
-        if Xc1 - Xc0 < 1.4:
+        if Xc1 - Xc0 < 1.4 or not left_req:
             compact = False
 
     if compact:
@@ -308,9 +328,17 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
                         y_cor0 + ti / 2.0, Xc1 - ti / 2.0, y_cor1 - ti / 2.0)
         rooms.append(corridor)
     else:
-        # Εφεδρική διάταξη: διάδρομος πλήρους πλάτους ζώνης νύχτας
+        # Εφεδρική διάταξη: διάδρομος πλήρους πλάτους ζώνης νύχτας. Τα λουτρά
+        # τοποθετούνται στα άκρα (εξωτ. Δ/Α όψη → φυσικό φως).
         if svc:
-            svc_rooms = _place_row(svc, nx0, nx1, y_svc0, y_svc1, te, ti,
+            baths = [r for r in svc if r.category == Category.BATH]
+            rest = [r for r in svc if r.category != Category.BATH]
+            ordered = ([baths[0]] if baths else []) + rest
+            if len(baths) > 1:
+                ordered.append(baths[1])
+            for b in baths[2:]:
+                ordered.insert(len(ordered) // 2, b)
+            svc_rooms = _place_row(ordered, nx0, nx1, y_svc0, y_svc1, te, ti,
                                    {"s": False, "n": False, "w": True, "e": True},
                                    mirror)
             rooms += svc_rooms
@@ -336,6 +364,12 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
             warnings.append(
                 f"{r.name}: {r.w:.2f}×{r.d:.2f} m — ελάχιστη πλευρά κάτω από "
                 f"{spec.min_bedroom_side:.2f} m (στενό περίγραμμα).")
+    # Το λουτρό πρέπει ΠΑΝΤΑ να έχει εξωτερικό φυσικό φωτισμό
+    for r in svc_rooms:
+        if r.category == Category.BATH and not r.ext_sides:
+            warnings.append(
+                f"{r.name}: χωρίς εξωτερικό άνοιγμα — απαιτείται αναδιάταξη ώστε "
+                f"να αποκτήσει φυσικό φωτισμό.")
     return plan, warnings
 
 
@@ -430,12 +464,16 @@ def _assign_openings(plan: FloorPlan, spec: BuildingSpec, corridor: Optional[Roo
             _corridor_door(room, corridor, plan.int_wall,
                            door_w.get(room.category, 0.90))
 
-    # Σύνδεση ζώνης ημέρας ↔ διαδρόμου μέσω του χωλ (θύρα και στη νότια πλευρά)
+    # Σύνδεση ζώνης ημέρας ↔ διαδρόμου: μέσω του χωλ αν υπάρχει· αλλιώς μέσω
+    # στεγνού βοηθητικού (αποθήκη/βεστιάριο) — ΠΟΤΕ μέσα από λουτρό/WC.
     hall = next((r for r in svc_rooms if r.category == Category.HALL), None)
-    if hall is not None:
-        _add_door(hall, "S", 0.90)
-    elif day_rooms and svc_rooms:
-        _add_door(svc_rooms[0], "S", 0.90)
+    connector = hall or next(
+        (r for r in svc_rooms if r.category in (Category.STORAGE,
+         Category.WARDROBE)), None) or next(
+        (r for r in svc_rooms if r.category not in (Category.BATH, Category.WC)),
+        None)
+    if connector is not None and day_rooms:
+        _add_door(connector, "S", 0.90)
 
     # Θύρα εισόδου στην όψη του ζητούμενου προσανατολισμού
     ent = entrance.value if entrance else "S"
@@ -478,7 +516,6 @@ def generate_proposals(spec: BuildingSpec) -> List[Proposal]:
     if errs:
         raise ValueError("Σφάλματα δεδομένων:\n- " + "\n- ".join(errs))
 
-    program_floors = build_program(spec)
     floor_labels = (["Ισόγειο"] if spec.floors == 1 else ["Ισόγειο", "Α' Όροφος"])
     # Πολυγωνικό (Γ/Τ) μόνο σε μονώροφο· σε διώροφο ορθογώνιο (δομική συνέπεια).
     shape = spec.shape_mode() if spec.floors == 1 else "rect"
@@ -486,6 +523,9 @@ def generate_proposals(spec: BuildingSpec) -> List[Proposal]:
     proposals: List[Proposal] = []
     for i in range(spec.num_proposals):
         seed = 1000 + i * 37
+        # Ο χωλ (αν επιλεγεί) ΔΕΝ μπαίνει σε όλες τις λύσεις — εναλλάσσεται.
+        include_hall = spec.has_hall and (i % 3 != 1)
+        program_floors = build_program(spec, include_hall)
         prop = Proposal(index=i + 1, spec=spec, seed=seed)
         base_W = base_H = None
         for fl_idx, program in enumerate(program_floors):
