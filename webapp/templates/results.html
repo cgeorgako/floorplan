@@ -26,15 +26,19 @@
   .card h2{margin:0 0 4px;font-size:16px}
   .meta{color:var(--muted);font-size:13px;margin-bottom:12px}
   .previews{display:flex;flex-wrap:wrap;gap:14px}
-  .previews a{flex:1 1 320px;border:1px solid var(--line);border-radius:8px;
-    overflow:hidden;background:#fff}
-  .previews img{width:100%;display:block}
+  .preview-wrap{flex:1 1 320px;border:1px solid var(--line);border-radius:8px;
+    overflow:hidden;background:#fff;position:relative;cursor:pointer}
+  .preview-wrap canvas{width:100%;display:block}
+  .preview-label{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);
+    color:#fff;font-size:11px;text-align:center;padding:3px 0}
   .links{display:flex;gap:12px;margin-top:14px;flex-wrap:wrap}
   .warn{margin-top:12px;background:#3a2a17;border:1px solid #6d5326;border-radius:8px;
     padding:10px 12px;font-size:12.5px;color:#ffe6c2}
   .warn b{color:#ffcf99}
   ul{margin:6px 0 0;padding-left:18px}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module" id="pdfjs-script"
+  data-pdfworker="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs"></script>
 </head>
 <body>
 <header>
@@ -57,7 +61,13 @@
     </div>
     {% if r.previews %}
     <div class="previews">
-      {% for pv in r.previews %}<a href="{{ pv }}" target="_blank"><img src="{{ pv }}" alt="κάτοψη"></a>{% endfor %}
+      {% for pv in r.previews %}
+      <div class="preview-wrap" data-pdf="{{ pv.pdf_url }}" data-page="{{ pv.page }}"
+           onclick="window.open('{{ r.pdf }}','_blank')">
+        <canvas></canvas>
+        <span class="preview-label">{{ pv.label }}</span>
+      </div>
+      {% endfor %}
     </div>
     {% endif %}
     <div class="links">
@@ -76,5 +86,49 @@
     μόνο οι έλεγχοι ύψους/φωτισμού/αερισμού· απαιτείται έλεγχος ΣΔ/κάλυψης/ύψους/Δ-δ
     πριν την αδειοδότηση.</p>
 </main>
+<script type="module">
+  const pdfjsScript = document.getElementById('pdfjs-script');
+  const workerSrc = pdfjsScript.dataset.pdfworker;
+
+  // Dynamically import the ES-module build of PDF.js
+  const { getDocument, GlobalWorkerOptions } = await import(pdfjsScript.src);
+  GlobalWorkerOptions.workerSrc = workerSrc;
+
+  // Cache open PDF documents so multiple floors of the same PDF share one fetch
+  const docCache = {};
+
+  async function getDoc(url) {
+    if (!docCache[url]) {
+      // Store the Promise immediately so parallel callers share one fetch
+      docCache[url] = getDocument(url).promise;
+    }
+    return docCache[url];
+  }
+
+  async function renderPreview(wrap) {
+    const pdfUrl = wrap.dataset.pdf;
+    const pageNum = parseInt(wrap.dataset.page, 10) + 1; // PDF.js uses 1-based pages
+    const canvas = wrap.querySelector('canvas');
+    try {
+      const pdf = await getDoc(pdfUrl);
+      const page = await pdf.getPage(Math.min(pageNum, pdf.numPages));
+      // Scale to fit container width (~640px logical, 2× for retina)
+      const viewport = page.getViewport({ scale: 1 });
+      const scale = (canvas.parentElement.clientWidth || 640) / viewport.width * window.devicePixelRatio;
+      const scaled = page.getViewport({ scale });
+      canvas.width = scaled.width;
+      canvas.height = scaled.height;
+      canvas.style.width = '100%';
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport: scaled }).promise;
+    } catch (err) {
+      console.warn('PDF preview failed for', pdfUrl, err);
+    }
+  }
+
+  // Render all previews in parallel
+  const wraps = document.querySelectorAll('.preview-wrap');
+  await Promise.all(Array.from(wraps).map(renderPreview));
+</script>
 </body>
 </html>

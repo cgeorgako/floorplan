@@ -34,12 +34,6 @@ from floorplan_gen.dxf_writer import write_proposal_dxf              # noqa: E40
 from floorplan_gen.pdf_writer import write_proposal_pdf, write_all_pdf  # noqa: E402
 from floorplan_gen.generator import _slug                            # noqa: E402
 
-try:
-    import pymupdf                       # για προεπισκόπηση PNG (προαιρετικό)
-    _HAS_PYMUPDF = True
-except Exception:                        # pragma: no cover
-    _HAS_PYMUPDF = False
-
 # ── Replit Object Storage (persistent across restarts) ──────────────────────
 try:
     from replit.object_storage import Client as _ObjClient
@@ -179,18 +173,16 @@ def generate():
         _upload_to_storage(os.path.join(run_dir, pdf_name), run_id, pdf_name)
         _upload_to_storage(os.path.join(run_dir, dxf_name), run_id, dxf_name)
 
-        previews = []
-        if _HAS_PYMUPDF:
-            try:
-                doc = pymupdf.open(os.path.join(run_dir, pdf_name))
-                for pi in range(min(len(prop.floors), doc.page_count)):
-                    png = f"{base}_p{prop.index}_pg{pi}.png"
-                    doc[pi].get_pixmap(dpi=110).save(os.path.join(run_dir, png))
-                    _upload_to_storage(os.path.join(run_dir, png), run_id, png)
-                    previews.append(url_for("serve_file", run_id=run_id, filename=png))
-                doc.close()
-            except Exception:
-                previews = []
+        # One preview entry per floor (PDF page index matches floor index).
+        # Client-side PDF.js renders the correct page without any native dep.
+        previews = [
+            {
+                "pdf_url": url_for("serve_file", run_id=run_id, filename=pdf_name),
+                "page": pi,   # 0-based page index within the PDF
+                "label": fl.floor_label,
+            }
+            for pi, fl in enumerate(prop.floors)
+        ]
 
         results.append({
             "index": prop.index,
