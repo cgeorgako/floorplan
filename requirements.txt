@@ -3,3 +3,4 @@ reportlab>=4.0
 # Προαιρετικά — μόνο για την web εφαρμογή (webapp/)
 Flask>=3.0        # τοπικός web server με φόρμα εισόδου
 PyMuPDF>=1.24     # προεπισκόπηση PNG στη σελίδα αποτελεσμάτων (προαιρετικό)
+gunicorn>=21.0    # production WSGI server
