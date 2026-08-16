@@ -94,7 +94,7 @@ def _fit_widths(areas: List[float], mins: List[float], avail: float) -> List[flo
 
 def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
                te: float, ti: float, ext: Dict[str, bool], mirror: bool,
-               north_ext_from_x: Optional[float] = None) -> List[Room]:
+               night_x: Optional[Tuple[float, float]] = None) -> List[Room]:
     """Τοποθετεί χώρους σε μία σειρά μέσα στην περιοχή [X0,X1]×[Y0,Y1] (σε
     συντεταγμένες περιγράμματος, με τοίχους). Οι εξωτερικές πλευρές αφήνουν
     πάχος te, οι εσωτερικές ti/2. Ορίζει τα ext_sides κάθε χώρου."""
@@ -116,9 +116,9 @@ def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
         es = set()
         if ext.get("s"):
             es.add("S")
-        if ext.get("n") or (north_ext_from_x is not None
-                            and rx1 > north_ext_from_x + 0.05):
-            es.add("N")   # ο χώρος εισχωρεί στην εσοχή (Γ) → βόρεια όψη εξωτερική
+        if ext.get("n") or (night_x is not None and (rx0 < night_x[0] - 0.05
+                            or rx1 > night_x[1] + 0.05)):
+            es.add("N")   # ο χώρος βγαίνει εκτός πτέρυγας νύχτας → βόρεια όψη εξωτ.
         if ext.get("w") and idx == 0:
             es.add("W")
         if ext.get("e") and idx == n - 1:
@@ -135,13 +135,17 @@ def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
 
 # ─────────────────────────── Διαστασιολόγηση περιγράμματος ────────────────────
 
-def _geometry(spec: BuildingSpec, program: List[RoomReq], is_L: bool,
+def _geometry(spec: BuildingSpec, program: List[RoomReq], shape: str,
               variant: int, force_W: Optional[float] = None,
               force_H: Optional[float] = None) -> dict:
-    """Υπολογίζει W, H, Wn, Hd, cd και τα εμβαδά ζωνών εντός ορίων & max εμβαδού.
+    """Υπολογίζει W, H, Wn, Xn (θέση πτέρυγας νύχτας), Hd, cd και εμβαδά ζωνών.
 
-    Τα force_W/force_H επιβάλλουν εξωτερικές διαστάσεις (δομική συνέπεια ορόφων).
+    `shape`: 'rect' | 'L' | 'T' | 'auto'. Το Xn (οριζόντια μετατόπιση της πτέρυγας
+    νύχτας πάνω στη νότια βάση) καθορίζει τον τύπο: Xn=0 → Γ (εσοχή ΒΑ),
+    Xn=W-Wn → Γ (εσοχή ΒΔ), κεντραρισμένο → Τ (εσοχές και στις δύο άνω γωνίες).
+    Τα force_W/force_H επιβάλλουν εξωτερικές διαστάσεις (συνέπεια ορόφων).
     """
+    poly = shape in ("L", "T", "auto")
     te, ti, ms = spec.ext_wall, spec.int_wall, spec.min_bedroom_side
     day = [r for r in program if r.category in DAY_CATEGORIES]
     beds = [r for r in program if r.category in (Category.BEDROOM,
@@ -166,7 +170,7 @@ def _geometry(spec: BuildingSpec, program: List[RoomReq], is_L: bool,
     # ελάχιστο πλάτος ζώνης νύχτας ώστε ΟΛΑ τα υπνοδωμάτια να τηρούν την ελάχ.
     # πλευρά (χρησιμοποιείται το πραγματικό min_width κάθε υ/δ — το master ζητά 3,20)
     bed_fit = sum(max(r.min_width, ms) for r in beds) + (nb - 1) * ti + 2 * te
-    if is_L:
+    if poly and day:
         Wn = _clamp(bed_fit + 0.5, 0.55 * W, W)
         Wn *= (1.0, 0.9, 1.05)[variant % 3]
         Wn = _clamp(max(Wn, bed_fit), 0.5 * W, W)
@@ -198,9 +202,25 @@ def _geometry(spec: BuildingSpec, program: List[RoomReq], is_L: bool,
     # το bed_fit (τυχόν μικρή υπέρβαση του μέγιστου εμβαδού είναι προτιμότερη).
     Wn = min(W, max(Wn, bed_fit))
 
+    # Θέση πτέρυγας νύχτας (Xn) → τύπος περιγράμματος
+    slack = W - Wn
+    used = "rect"
+    Xn = 0.0
+    if poly and day and slack > 0.35:
+        pick = shape
+        if shape == "auto":                       # «αυτοσχεδιασμός» ανά πρόταση
+            pick = ("L", "T", "Lr")[variant % 3]
+        if pick == "T":
+            Xn, used = slack / 2.0, "T"
+        elif pick in ("Lr",) or (pick == "L" and variant % 2):
+            Xn, used = slack, "L"                 # εσοχή ΒΔ (Γ κατοπτρικό)
+        else:
+            Xn, used = 0.0, "L"                    # εσοχή ΒΑ (Γ)
+
     return {"W": round(W, 3), "H": round(H, 3), "Wn": round(min(Wn, W), 3),
-            "Hd": round(Hd, 3), "Hs": round(Hs, 3), "Hb": round(Hb, 3),
-            "cd": round(cd, 3), "day": day, "beds": beds, "svc": svc, "is_L": is_L}
+            "Xn": round(Xn, 3), "Hd": round(Hd, 3), "Hs": round(Hs, 3),
+            "Hb": round(Hb, 3), "cd": round(cd, 3), "day": day, "beds": beds,
+            "svc": svc, "shape": used}
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -210,16 +230,19 @@ def _clamp(v: float, lo: float, hi: float) -> float:
 # ─────────────────────────────── Διάταξη ορόφου ───────────────────────────────
 
 def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
-                 seed: int, entrance: Orientation, is_L: bool, variant: int = 0,
+                 seed: int, entrance: Orientation, shape: str, variant: int = 0,
                  force_W: Optional[float] = None,
                  force_H: Optional[float] = None) -> Tuple[FloorPlan, List[str]]:
     warnings: List[str] = []
     te, ti = spec.ext_wall, spec.int_wall
-    g = _geometry(spec, program, is_L, variant, force_W, force_H)
-    W, H, Wn = g["W"], g["H"], g["Wn"]
+    g = _geometry(spec, program, shape, variant, force_W, force_H)
+    W, H, Wn, Xn = g["W"], g["H"], g["Wn"], g["Xn"]
     Hd, Hs, Hb, cd = g["Hd"], g["Hs"], g["Hb"], g["cd"]
     day, beds, svc = g["day"], g["beds"], g["svc"]
-    is_L = g["is_L"] and (Wn < W - 0.3)
+    poly = g["shape"] in ("L", "T") and Wn < W - 0.3 and Hd > 0.3
+    if not poly:
+        Xn, Wn = 0.0, W
+    nx0, nx1 = Xn, Xn + Wn                    # όρια πτέρυγας νύχτας (Α–Δ)
     mirror = bool(variant % 2)
 
     plan = FloorPlan(floor_label, round(W, 2), round(H, 2), te, ti, entrance=entrance)
@@ -235,18 +258,18 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
     bed_rooms: List[Room] = []
     svc_rooms: List[Room] = []
 
-    # Ζώνη ημέρας (νότια, πλήρες πλάτος W). Το βόρειο άκρο πέρα από Wn είναι
-    # εξωτερικό (εσοχή του Γ) → north_ext_from_x=Wn.
+    # Ζώνη ημέρας (νότια βάση, πλήρες πλάτος W). Όσοι χώροι βγαίνουν εκτός της
+    # πτέρυγας νύχτας [nx0,nx1] έχουν βόρεια όψη εξωτερική (εσοχές Γ/Τ).
     if day and Hd > 0.3:
         day_rooms = _place_row(day, 0.0, W, y_day0, y_day1, te, ti,
                                {"s": True, "n": False, "w": True, "e": True},
-                               mirror, north_ext_from_x=(Wn if is_L else None))
+                               mirror, night_x=((nx0, nx1) if poly else None))
         rooms += day_rooms
 
-    # Ζώνη νύχτας (βόρεια). Υπνοδωμάτια σε βόρεια σειρά· βοηθητικοί κάτω.
+    # Ζώνη νύχτας (βόρεια πτέρυγα [nx0,nx1]). Υπνοδωμάτια βόρεια, βοηθητικοί κάτω.
     corridor: Optional[Room] = None
     if beds:
-        bed_rooms = _place_row(beds, 0.0, Wn, y_bed0, y_bed1, te, ti,
+        bed_rooms = _place_row(beds, nx0, nx1, y_bed0, y_bed1, te, ti,
                                {"s": False, "n": True, "w": True, "e": True}, mirror)
         rooms += bed_rooms
 
@@ -265,15 +288,15 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
         wl = _clamp(left_req.target_area / full_depth, left_req.min_width, 0.30 * Wn)
         wr = (_clamp(right_req.target_area / full_depth, right_req.min_width,
                      0.30 * Wn) if right_req else 0.0)
-        Xc0 = te + wl + ti
-        Xc1 = Wn - te - (wr + ti if right_req else 0.0)
+        Xc0 = nx0 + te + wl + ti
+        Xc1 = nx1 - te - (wr + ti if right_req else 0.0)
         if Xc1 - Xc0 < 1.4:
             compact = False
 
     if compact:
-        left_rooms = _place_row([left_req], 0.0, Xc0, y_svc0, y_bed0, te, ti,
+        left_rooms = _place_row([left_req], nx0, Xc0, y_svc0, y_bed0, te, ti,
                                 {"s": False, "n": False, "w": True, "e": False}, False)
-        right_rooms = (_place_row([right_req], Xc1, Wn, y_svc0, y_bed0, te, ti,
+        right_rooms = (_place_row([right_req], Xc1, nx1, y_svc0, y_bed0, te, ti,
                        {"s": False, "n": False, "w": False, "e": True}, False)
                        if right_req else [])
         mid_rooms = (_place_row(mid_reqs, Xc0, Xc1, y_svc0, y_svc1, te, ti,
@@ -287,19 +310,22 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
     else:
         # Εφεδρική διάταξη: διάδρομος πλήρους πλάτους ζώνης νύχτας
         if svc:
-            svc_rooms = _place_row(svc, 0.0, Wn, y_svc0, y_svc1, te, ti,
+            svc_rooms = _place_row(svc, nx0, nx1, y_svc0, y_svc1, te, ti,
                                    {"s": False, "n": False, "w": True, "e": True},
                                    mirror)
             rooms += svc_rooms
-        if (bed_rooms or svc_rooms) and cd > 0.05 and Wn - 2 * te > 0.3:
-            corridor = Room(Category.CORRIDOR, "Διάδρομος", te, y_cor0 + ti / 2.0,
-                            Wn - te, y_cor1 - ti / 2.0)
+        if (bed_rooms or svc_rooms) and cd > 0.05 and nx1 - nx0 - 2 * te > 0.3:
+            corridor = Room(Category.CORRIDOR, "Διάδρομος", nx0 + te,
+                            y_cor0 + ti / 2.0, nx1 - te, y_cor1 - ti / 2.0)
             rooms.append(corridor)
 
     plan.rooms = rooms
-    plan.cells = [(0.0, 0.0, W, Hd), (0.0, Hd, Wn, H)] if Hd > 0.3 else \
-                 [(0.0, 0.0, Wn, H)]
-    plan.outline = _outline(W, H, Wn, Hd, is_L)
+    if Hd > 0.3:
+        plan.cells = [(0.0, 0.0, W, Hd), (nx0, Hd, nx1, H)]
+    else:
+        plan.cells = [(nx0, 0.0, nx1, H)]
+    plan.outline = _outline(W, H, nx0, nx1, Hd) if Hd > 0.3 else \
+                   [(nx0, 0.0), (nx1, 0.0), (nx1, H), (nx0, H)]
 
     _assign_openings(plan, spec, corridor, day_rooms, bed_rooms, svc_rooms,
                      entrance)
@@ -313,12 +339,21 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
     return plan, warnings
 
 
-def _outline(W: float, H: float, Wn: float, Hd: float,
-             is_L: bool) -> List[Tuple[float, float]]:
-    if is_L and Wn < W - 0.3 and Hd > 0.3:
-        # Γ-σχήμα με εσοχή στη ΒΑ γωνία (ορθογωνισμένο, χωρίς καμπύλες)
-        return [(0.0, 0.0), (W, 0.0), (W, Hd), (Wn, Hd), (Wn, H), (0.0, H)]
-    return [(0.0, 0.0), (W, 0.0), (W, H), (0.0, H)]
+def _outline(W: float, H: float, nx0: float, nx1: float,
+             Hd: float) -> List[Tuple[float, float]]:
+    """Ορθογωνισμένο περίγραμμα: νότια βάση [0,W]×[0,Hd] + πτέρυγα νύχτας
+    [nx0,nx1]×[Hd,H]. Παράγει Ι/Γ/Τ ανάλογα με τη θέση της πτέρυγας."""
+    ln = nx0 > 0.05                      # εσοχή αριστερά (ΒΔ)
+    rn = nx1 < W - 0.05                  # εσοχή δεξιά (ΒΑ)
+    if not ln and not rn:                # ορθογώνιο
+        return [(0.0, 0.0), (W, 0.0), (W, H), (0.0, H)]
+    if not ln and rn:                    # Γ, εσοχή ΒΑ
+        return [(0.0, 0.0), (W, 0.0), (W, Hd), (nx1, Hd), (nx1, H), (0.0, H)]
+    if ln and not rn:                    # Γ, εσοχή ΒΔ
+        return [(0.0, 0.0), (W, 0.0), (W, H), (nx0, H), (nx0, Hd), (0.0, Hd)]
+    # Τ, εσοχές και στις δύο άνω γωνίες
+    return [(0.0, 0.0), (W, 0.0), (W, Hd), (nx1, Hd), (nx1, H), (nx0, H),
+            (nx0, Hd), (0.0, Hd)]
 
 
 # ─────────────────────────────── Ανοίγματα ───────────────────────────────────
@@ -445,8 +480,8 @@ def generate_proposals(spec: BuildingSpec) -> List[Proposal]:
 
     program_floors = build_program(spec)
     floor_labels = (["Ισόγειο"] if spec.floors == 1 else ["Ισόγειο", "Α' Όροφος"])
-    # Πολυγωνικό (Γ) μόνο σε μονώροφο· σε διώροφο ορθογώνιο (δομική συνέπεια).
-    use_L = spec.is_polygonal and spec.floors == 1
+    # Πολυγωνικό (Γ/Τ) μόνο σε μονώροφο· σε διώροφο ορθογώνιο (δομική συνέπεια).
+    shape = spec.shape_mode() if spec.floors == 1 else "rect"
 
     proposals: List[Proposal] = []
     for i in range(spec.num_proposals):
@@ -456,7 +491,7 @@ def generate_proposals(spec: BuildingSpec) -> List[Proposal]:
         for fl_idx, program in enumerate(program_floors):
             plan, warns = layout_floor(
                 spec, program, floor_labels[fl_idx], seed + fl_idx,
-                spec.entrance, use_L, variant=i, force_W=base_W, force_H=base_H)
+                spec.entrance, shape, variant=i, force_W=base_W, force_H=base_H)
             if fl_idx == 0:            # δομική συνέπεια: οι επόμενοι όροφοι
                 base_W = plan.width_ew  # ακολουθούν το εξωτ. περίγραμμα του ισογείου
                 base_H = plan.length_ns

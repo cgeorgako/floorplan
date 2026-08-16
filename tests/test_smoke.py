@@ -70,11 +70,22 @@ def test_bedrooms_meet_min_side():
                     assert min(r.w, r.d) >= 3.0 - 0.05, f"{r.name} {r.w:.2f}×{r.d:.2f}"
 
 
-def test_polygonal_default_is_L():
-    # προεπιλογή = πολυγωνικό (Γ) σε μονώροφο → περίγραμμα με 6 κορυφές
-    props = generate_proposals(_spec(footprint_shape="polygonal"))
-    assert any(len(p.floors[0].outline) >= 6 for p in props), \
-        "Καμία πρόταση δεν παρήγαγε Γ-σχήμα"
+def test_auto_improvises_shapes():
+    # «auto» → διαφορετικοί τύποι ανά πρόταση (Γ=6 κορυφές, Τ=8 κορυφές)
+    props = generate_proposals(_spec(footprint_shape="auto", num_proposals=3))
+    verts = {len(p.floors[0].outline) for p in props}
+    assert 6 in verts, "Δεν παρήχθη Γ-σχήμα"
+    assert 8 in verts, "Δεν παρήχθη Τ-σχήμα"
+
+
+def test_shape_T_gives_8_vertices():
+    p = generate_proposals(_spec(footprint_shape="T"))[0]
+    assert len(p.floors[0].outline) == 8
+
+
+def test_shape_L_gives_6_vertices():
+    p = generate_proposals(_spec(footprint_shape="L"))[0]
+    assert len(p.floors[0].outline) == 6
 
 
 def test_rectangular_override():

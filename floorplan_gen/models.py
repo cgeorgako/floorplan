@@ -133,10 +133,25 @@ class BuildingSpec:
     client: str = ""
     location: str = "Αμαλιάδα, Π.Ε. Ηλείας"
 
+    def shape_mode(self) -> str:
+        """Επιστρέφει τον τύπο περιγράμματος: 'rect' | 'L' | 'T' | 'auto'.
+
+        'auto' (=πολυγωνικό, προεπιλογή): η εφαρμογή «αυτοσχεδιάζει», δίνοντας
+        διαφορετικό ορθογωνισμένο σχήμα (Γ αριστερά/δεξιά, Τ) ανά πρόταση.
+        """
+        s = str(self.footprint_shape).strip().lower()
+        if s in ("rectangular", "rect", "ορθογώνιο", "ορθογωνικό", "orthogonal",
+                 "i", "ι"):
+            return "rect"
+        if s in ("l", "γ", "g", "gamma", "l-shape", "γ-σχήμα", "gamma-shape"):
+            return "L"
+        if s in ("t", "τ", "tau", "t-shape", "τ-σχήμα", "tau-shape"):
+            return "T"
+        return "auto"
+
     @property
     def is_polygonal(self) -> bool:
-        return str(self.footprint_shape).strip().lower() not in (
-            "rectangular", "rect", "ορθογώνιο", "ορθογωνικό", "orthogonal")
+        return self.shape_mode() != "rect"
 
     def validate(self) -> List[str]:
         errs: List[str] = []

@@ -91,7 +91,9 @@
         <div class="fld">
           <label>Σχήμα περιγράμματος</label>
           <select name="footprint_shape">
-            <option value="polygonal" selected>Πολυγωνικό (Γ)</option>
+            <option value="auto" selected>Αυτόματο (Γ / Τ — αυτοσχεδιασμός)</option>
+            <option value="L">Γ (L)</option>
+            <option value="T">Τ (T)</option>
             <option value="rectangular">Ορθογώνιο</option>
           </select>
         </div>
@@ -100,7 +102,8 @@
           <input type="number" step="0.1" name="max_total_area" value="130">
         </div>
       </div>
-      <p class="note">Ο Βορράς τοποθετείται πάντα στο επάνω μέρος του σχεδίου.</p>
+      <p class="note">Ο Βορράς πάντα επάνω. «Αυτόματο» = διαφορετικός τύπος
+        (Γ αριστερά/δεξιά, Τ) ανά πρόταση.</p>
     </fieldset>
 
     <fieldset>
