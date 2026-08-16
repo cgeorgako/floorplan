@@ -9,6 +9,9 @@
 προσωρινή μνήμη (webapp/static/out/) και αν λείπει το αρχείο κατεβαίνει αυτόματα
 από το Object Storage.
 
+Καθαρισμός: κάθε φορά που τρέχει μια νέα γέννηση, διαγράφονται αυτόματα από το
+Object Storage τα αρχεία εκτελέσεων παλαιότερων από CLEANUP_MAX_AGE_DAYS ημέρες.
+
 Εκτέλεση:
     python -m webapp.app         (ή)   python webapp/app.py
     → άνοιξε http://127.0.0.1:5000
@@ -19,7 +22,9 @@ import io
 import json
 import logging
 import os
+import shutil
 import sys
+import time
 import uuid
 import zipfile
 
@@ -48,6 +53,9 @@ except Exception:                        # pragma: no cover
 
 _log = logging.getLogger(__name__)
 
+# Αρχεία παλαιότερα από αυτές τις ημέρες διαγράφονται αυτόματα.
+CLEANUP_MAX_AGE_DAYS: int = int(os.environ.get("CLEANUP_MAX_AGE_DAYS", "30"))
+
 
 def _storage_key(run_id: str, filename: str) -> str:
     """Κλειδί αντικειμένου στο Object Storage."""
@@ -66,6 +74,62 @@ def _upload_to_storage(local_path: str, run_id: str, filename: str) -> None:
     except Exception as exc:             # pragma: no cover
         _log.warning("Object Storage upload failed for %s/%s: %s",
                      run_id, filename, exc)
+
+
+def _cleanup_old_runs(max_age_days: int = CLEANUP_MAX_AGE_DAYS) -> None:
+    """Διαγράφει από το Object Storage εκτελέσεις παλαιότερες από max_age_days.
+
+    Ο αλγόριθμος:
+    1. Κάνει list όλα τα αντικείμενα με prefix «out/» και βρίσκει τα manifest.json.
+    2. Για κάθε manifest, διαβάζει το πεδίο «created_at» (Unix timestamp).
+    3. Αν το run είναι παλαιότερο από το κατώφλι, διαγράφει όλα τα αρχεία του
+       από το Object Storage και εκκαθαρίζει την τοπική cache.
+
+    Αποτυγχάνει αθόρυβα ώστε να μη διακοπεί ποτέ η εξυπηρέτηση.
+    """
+    if not _HAS_OBJECT_STORAGE:
+        return
+    try:
+        cutoff = time.time() - max_age_days * 86_400
+        objects = _storage.list(prefix="out/", match_glob="out/*/manifest.json")
+        for obj in objects:
+            # obj.name → "out/<run_id>/manifest.json"
+            parts = obj.name.split("/")
+            if len(parts) != 3 or parts[2] != "manifest.json":
+                continue
+            run_id = parts[1]
+            try:
+                raw = _storage.download_as_bytes(obj.name)
+                manifest = json.loads(raw)
+                created_at = manifest.get("created_at")
+                # Manifest χωρίς created_at (legacy ή κατεστραμμένο) → αφήσε το.
+                # Ποτέ μην το διαγράψεις αν δεν ξέρουμε πότε δημιουργήθηκε.
+                if created_at is None:
+                    continue
+                if created_at >= cutoff:
+                    continue  # αρκετά πρόσφατο, κράτησέ το
+
+                # Διαγραφή από Object Storage
+                filenames_to_delete = manifest.get("files", []) + ["manifest.json"]
+                for fname in filenames_to_delete:
+                    try:
+                        _storage.delete(
+                            _storage_key(run_id, fname),
+                            ignore_not_found=True,
+                        )
+                    except Exception:
+                        pass
+
+                # Εκκαθάριση τοπικής cache (OUT_ROOT είναι module-level)
+                run_dir = os.path.join(OUT_ROOT, run_id)
+                if os.path.isdir(run_dir):
+                    shutil.rmtree(run_dir, ignore_errors=True)
+
+                _log.info("Cleanup: deleted run %s (age > %d days)", run_id, max_age_days)
+            except Exception as exc:
+                _log.warning("Cleanup: skipping run %s: %s", run_id, exc)
+    except Exception as exc:
+        _log.warning("Cleanup: listing objects failed: %s", exc)
 
 
 def _ensure_local(run_id: str, filename: str) -> bool:
@@ -156,6 +220,9 @@ def index():
 
 @app.route("/generate", methods=["POST"])
 def generate():
+    # Καθαρισμός παλαιών αρχείων — αθόρυβος, δεν επηρεάζει την τρέχουσα εκτέλεση.
+    _cleanup_old_runs()
+
     try:
         spec = spec_from_form()
         proposals = generate_proposals(spec)
@@ -214,7 +281,7 @@ def generate():
     manifest_name = "manifest.json"
     manifest_path = os.path.join(run_dir, manifest_name)
     with open(manifest_path, "w", encoding="utf-8") as fh:
-        json.dump({"files": zip_filenames}, fh)
+        json.dump({"files": zip_filenames, "created_at": time.time()}, fh)
     _upload_to_storage(manifest_path, run_id, manifest_name)
 
     zip_url = url_for("download_zip", run_id=run_id)
