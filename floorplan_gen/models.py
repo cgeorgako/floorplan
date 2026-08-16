@@ -151,6 +151,8 @@ class BuildingSpec:
             return "L"
         if s in ("t", "τ", "tau", "t-shape", "τ-σχήμα", "tau-shape"):
             return "T"
+        if s in ("z", "ζ", "zeta", "z-shape", "κλιμακωτό", "staggered", "s"):
+            return "Z"
         return "auto"
 
     @property

@@ -78,6 +78,31 @@ def test_auto_improvises_shapes():
     assert 8 in verts, "Δεν παρήχθη Τ-σχήμα"
 
 
+def _is_staggered(outline):
+    # «κλιμακωτό» Z: η κάτω ακμή ξεκινά μετατοπισμένη ως προς το αριστερότερο
+    # σημείο του περιγράμματος (εσοχή σε διαγώνια αντίθετες γωνίες).
+    minx = min(x for x, _ in outline)
+    bottom_minx = min((x for x, y in outline if abs(y) < 0.05), default=minx)
+    top_y = max(y for _, y in outline)
+    top_maxx = max((x for x, y in outline if abs(y - top_y) < 0.05), default=0)
+    maxx = max(x for x, _ in outline)
+    return bottom_minx > minx + 0.3 and top_maxx < maxx - 0.3
+
+
+def test_shape_Z_is_staggered():
+    # Το σχήμα Z παράγει κλιμακωτό περίγραμμα (εσοχές σε δύο διαγώνιες γωνίες).
+    p = generate_proposals(_spec(max_length_ns=11.0, footprint_shape="Z"))[0]
+    assert _is_staggered(p.floors[0].outline), "Το Z δεν είναι κλιμακωτό"
+
+
+def test_auto_includes_staggered():
+    # Ο «αυτοσχεδιασμός» παράγει και κλιμακωτό (Z) περίγραμμα, όχι μόνο Γ/Τ.
+    props = generate_proposals(_spec(max_length_ns=11.0, footprint_shape="auto",
+                                     num_proposals=3))
+    assert any(_is_staggered(p.floors[0].outline) for p in props), \
+        "Ο αυτοσχεδιασμός δεν παρήγαγε κλιμακωτό (Z) σχήμα"
+
+
 def test_shape_T_gives_8_vertices():
     p = generate_proposals(_spec(footprint_shape="T"))[0]
     assert len(p.floors[0].outline) == 8

@@ -110,7 +110,8 @@ def _fit_widths(areas: List[float], mins: List[float], avail: float,
 
 def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
                te: float, ti: float, ext: Dict[str, bool], mirror: bool,
-               night_x: Optional[Tuple[float, float]] = None) -> List[Room]:
+               night_x: Optional[Tuple[float, float]] = None,
+               day_x: Optional[Tuple[float, float]] = None) -> List[Room]:
     """Τοποθετεί χώρους σε μία σειρά μέσα στην περιοχή [X0,X1]×[Y0,Y1] (σε
     συντεταγμένες περιγράμματος, με τοίχους). Οι εξωτερικές πλευρές αφήνουν
     πάχος te, οι εσωτερικές ti/2. Ορίζει τα ext_sides κάθε χώρου."""
@@ -132,7 +133,10 @@ def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
     for idx, (r, w) in enumerate(zip(ordered, widths)):
         rx0, rx1 = x, x + w
         es = set()
-        if ext.get("s"):
+        # Νότια όψη εξωτερική εκτός αν ο χώρος καλύπτεται πλήρως από τη νότια βάση
+        # ημέρας (κλιμακωτό Z: τμήμα ζώνης νύχτας εκτός βάσης → όψη προς ύπαιθρο).
+        if ext.get("s") or (day_x is not None and not (
+                day_x[0] - 0.05 <= rx0 and rx1 <= day_x[1] + 0.05)):
             es.add("S")
         # Βόρεια όψη εξωτερική εκτός αν ο χώρος βρίσκεται ΕΞ ΟΛΟΚΛΗΡΟΥ κάτω από την
         # πτέρυγα νύχτας. Αν «πατάει» έστω και εν μέρει στην εσοχή (Γ/Τ), η βόρεια
@@ -167,7 +171,7 @@ def _geometry(spec: BuildingSpec, program: List[RoomReq], shape: str,
     Xn=W-Wn → Γ (εσοχή ΒΔ), κεντραρισμένο → Τ (εσοχές και στις δύο άνω γωνίες).
     Τα force_W/force_H επιβάλλουν εξωτερικές διαστάσεις (συνέπεια ορόφων).
     """
-    poly = shape in ("L", "T", "auto")
+    poly = shape in ("L", "T", "Z", "auto")
     te, ti, ms = spec.ext_wall, spec.int_wall, spec.min_bedroom_side
     day = [r for r in program if r.category in DAY_CATEGORIES]
     beds = [r for r in program if r.category in (Category.BEDROOM,
@@ -241,21 +245,33 @@ def _geometry(spec: BuildingSpec, program: List[RoomReq], shape: str,
     slack = W - Wn
     used = "rect"
     Xn = 0.0
+    Xd = 0.0                                       # μετατόπιση νότιας βάσης (Z)
     if poly and day and slack > 0.35:
         pick = shape
         if shape == "auto":                       # «αυτοσχεδιασμός» ανά πρόταση
-            pick = ("L", "T", "Lr")[variant % 3]
+            pick = ("L", "T", "Z", "Lr")[variant % 4]
         if pick == "T":
             Xn, used = slack / 2.0, "T"
+        elif pick == "Z":
+            # Κλιμακωτό (Z): πτέρυγα νύχτας αριστερά (εσοχή ΒΑ) + νότια βάση
+            # δεξιά (εσοχή ΝΔ) → εσοχές σε διαγώνια αντίθετες γωνίες. Εφαρμόζεται
+            # μόνο αν τα δωμάτια ημέρας χωρούν στη στενότερη βάση.
+            day_fit = (sum(r.min_width for r in day) + (len(day) - 1) * ti
+                       + 2 * te)
+            room_notch = min(slack, W - day_fit - 0.30)
+            if room_notch > 0.5:
+                Xn, Xd, used = 0.0, room_notch, "Z"
+            else:
+                Xn, used = 0.0, "L"                # πολύ στενή βάση → πτώση σε Γ
         elif pick in ("Lr",) or (pick == "L" and variant % 2):
             Xn, used = slack, "L"                 # εσοχή ΒΔ (Γ κατοπτρικό)
         else:
             Xn, used = 0.0, "L"                    # εσοχή ΒΑ (Γ)
 
     return {"W": round(W, 3), "H": round(H, 3), "Wn": round(min(Wn, W), 3),
-            "Xn": round(Xn, 3), "Hd": round(Hd, 3), "Hs": round(Hs, 3),
-            "Hb": round(Hb, 3), "cd": round(cd, 3), "day": day, "beds": beds,
-            "svc": svc, "shape": used}
+            "Xn": round(Xn, 3), "Xd": round(Xd, 3), "Hd": round(Hd, 3),
+            "Hs": round(Hs, 3), "Hb": round(Hb, 3), "cd": round(cd, 3),
+            "day": day, "beds": beds, "svc": svc, "shape": used}
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -272,12 +288,17 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
     te, ti = spec.ext_wall, spec.int_wall
     g = _geometry(spec, program, shape, variant, force_W, force_H)
     W, H, Wn, Xn = g["W"], g["H"], g["Wn"], g["Xn"]
+    Xd = g.get("Xd", 0.0)
     Hd, Hs, Hb, cd = g["Hd"], g["Hs"], g["Hb"], g["cd"]
     day, beds, svc = g["day"], g["beds"], g["svc"]
-    poly = g["shape"] in ("L", "T") and Wn < W - 0.3 and Hd > 0.3
+    poly = g["shape"] in ("L", "T", "Z") and Wn < W - 0.3 and Hd > 0.3
     if not poly:
         Xn, Wn = 0.0, W
+    if g["shape"] != "Z" or not poly:
+        Xd = 0.0
+    dx0, dx1 = Xd, W                          # όρια νότιας βάσης ημέρας (Α–Δ)
     nx0, nx1 = Xn, Xn + Wn                    # όρια πτέρυγας νύχτας (Α–Δ)
+    day_x = (dx0, dx1) if Xd > 0.05 else None   # για σήμανση νότιας όψης (Z)
     mirror = bool(variant % 2)
 
     plan = FloorPlan(floor_label, round(W, 2), round(H, 2), te, ti, entrance=entrance)
@@ -296,7 +317,7 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
     # Ζώνη ημέρας (νότια βάση, πλήρες πλάτος W). Όσοι χώροι βγαίνουν εκτός της
     # πτέρυγας νύχτας [nx0,nx1] έχουν βόρεια όψη εξωτερική (εσοχές Γ/Τ).
     if day and Hd > 0.3:
-        day_rooms = _place_row(day, 0.0, W, y_day0, y_day1, te, ti,
+        day_rooms = _place_row(day, dx0, dx1, y_day0, y_day1, te, ti,
                                {"s": True, "n": False, "w": True, "e": True},
                                mirror, night_x=((nx0, nx1) if poly else None))
         rooms += day_rooms
@@ -353,12 +374,15 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
 
     if compact:
         left_rooms = _place_row([left_req], nx0, Xc0, y_svc0, y_bed0, te, ti,
-                                {"s": False, "n": False, "w": True, "e": False}, False)
+                                {"s": False, "n": False, "w": True, "e": False},
+                                False, day_x=day_x)
         right_rooms = (_place_row([right_req], Xc1, nx1, y_svc0, y_bed0, te, ti,
-                       {"s": False, "n": False, "w": False, "e": True}, False)
+                       {"s": False, "n": False, "w": False, "e": True}, False,
+                       day_x=day_x)
                        if right_req else [])
         mid_rooms = (_place_row(mid_reqs, Xc0, Xc1, y_svc0, y_svc1, te, ti,
-                     {"s": False, "n": False, "w": False, "e": False}, mirror)
+                     {"s": False, "n": False, "w": False, "e": False}, mirror,
+                     day_x=day_x)
                      if mid_reqs else [])
         svc_rooms = left_rooms + mid_rooms + right_rooms
         rooms += svc_rooms
@@ -387,7 +411,7 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
                 ordered.insert(len(ordered) // 2, b)
             svc_rooms = _place_row(ordered, nx0, nx1, y_svc0, y_svc1, te, ti,
                                    {"s": False, "n": False, "w": True, "e": True},
-                                   mirror)
+                                   mirror, day_x=day_x)
             rooms += svc_rooms
         if (bed_rooms or svc_rooms) and cd > 0.05 and nx1 - nx0 - 2 * te > 0.3:
             corridor = Room(Category.CORRIDOR, "Διάδρομος", nx0 + te,
@@ -396,11 +420,11 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
 
     plan.rooms = rooms
     if Hd > 0.3:
-        plan.cells = [(0.0, 0.0, W, Hd), (nx0, Hd, nx1, H)]
+        plan.cells = [(dx0, 0.0, dx1, Hd), (nx0, Hd, nx1, H)]
+        plan.outline = _outline_stack(dx0, dx1, nx0, nx1, Hd, H)
     else:
         plan.cells = [(nx0, 0.0, nx1, H)]
-    plan.outline = _outline(W, H, nx0, nx1, Hd) if Hd > 0.3 else \
-                   [(nx0, 0.0), (nx1, 0.0), (nx1, H), (nx0, H)]
+        plan.outline = [(nx0, 0.0), (nx1, 0.0), (nx1, H), (nx0, H)]
 
     _assign_openings(plan, spec, corridor, day_rooms, bed_rooms, svc_rooms,
                      entrance)
@@ -431,21 +455,37 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
     return plan, warnings
 
 
-def _outline(W: float, H: float, nx0: float, nx1: float,
-             Hd: float) -> List[Tuple[float, float]]:
-    """Ορθογωνισμένο περίγραμμα: νότια βάση [0,W]×[0,Hd] + πτέρυγα νύχτας
-    [nx0,nx1]×[Hd,H]. Παράγει Ι/Γ/Τ ανάλογα με τη θέση της πτέρυγας."""
-    ln = nx0 > 0.05                      # εσοχή αριστερά (ΒΔ)
-    rn = nx1 < W - 0.05                  # εσοχή δεξιά (ΒΑ)
-    if not ln and not rn:                # ορθογώνιο
-        return [(0.0, 0.0), (W, 0.0), (W, H), (0.0, H)]
-    if not ln and rn:                    # Γ, εσοχή ΒΑ
-        return [(0.0, 0.0), (W, 0.0), (W, Hd), (nx1, Hd), (nx1, H), (0.0, H)]
-    if ln and not rn:                    # Γ, εσοχή ΒΔ
-        return [(0.0, 0.0), (W, 0.0), (W, H), (nx0, H), (nx0, Hd), (0.0, Hd)]
-    # Τ, εσοχές και στις δύο άνω γωνίες
-    return [(0.0, 0.0), (W, 0.0), (W, Hd), (nx1, Hd), (nx1, H), (nx0, H),
-            (nx0, Hd), (0.0, Hd)]
+def _outline_stack(dx0: float, dx1: float, nx0: float, nx1: float,
+                   Hd: float, H: float) -> List[Tuple[float, float]]:
+    """Γενικό ορθογωνισμένο περίγραμμα ένωσης δύο στοιβαγμένων ορθογωνίων: νότια
+    βάση ημέρας [dx0,dx1]×[0,Hd] + πτέρυγα νύχτας [nx0,nx1]×[Hd,H]. Παράγει
+    I/Γ/Τ (όταν dx0=0, dx1=W) ή κλιμακωτό Z (όταν η βάση είναι μετατοπισμένη),
+    αφαιρώντας τυχόν εκφυλισμένες (συνευθειακές) κορυφές."""
+    # CCW περίγραμμα ένωσης: κάτω βάση → δεξιά ακμή → σκαλί στο Hd → πτέρυγα →
+    # σκαλί επιστροφής → αριστερή ακμή. Οι εκφυλισμένες κορυφές (όταν οι ακμές
+    # ταυτίζονται, π.χ. ορθογώνιο/Γ) αφαιρούνται στη συνέχεια.
+    pts: List[Tuple[float, float]] = [
+        (dx0, 0.0), (dx1, 0.0), (dx1, Hd), (nx1, Hd),
+        (nx1, H), (nx0, H), (nx0, Hd), (dx0, Hd)]
+    # καθάρισμα συνευθειακών/διπλών κορυφών
+    out: List[Tuple[float, float]] = []
+    for p in pts:
+        if not out or abs(out[-1][0] - p[0]) > 1e-6 or abs(out[-1][1] - p[1]) > 1e-6:
+            out.append(p)
+    while len(out) > 3:
+        removed = False
+        i = 0
+        while i < len(out):
+            a, b, cc = out[i - 1], out[i], out[(i + 1) % len(out)]
+            if (abs(a[0] - b[0]) < 1e-6 and abs(b[0] - cc[0]) < 1e-6) or \
+               (abs(a[1] - b[1]) < 1e-6 and abs(b[1] - cc[1]) < 1e-6):
+                out.pop(i)                # συνευθειακή → αφαίρεση
+                removed = True
+            else:
+                i += 1
+        if not removed:
+            break
+    return out
 
 
 # ─────────────────────────────── Ανοίγματα ───────────────────────────────────
