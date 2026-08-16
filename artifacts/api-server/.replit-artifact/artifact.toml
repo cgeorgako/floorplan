@@ -30,3 +30,11 @@ NODE_ENV = "production"
 
 [services.production.health.startup]
 path = "/api/healthz"
+
+[[services]]
+localPort = 5000
+name = "Flask App"
+paths = ["/"]
+
+[services.development]
+run = "cd /home/runner/workspace && pip install -r requirements.txt --quiet && gunicorn --bind=0.0.0.0:5000 --reuse-port webapp.app:app"
