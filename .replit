@@ -42,3 +42,7 @@ outputType = "webview"
 [deployment]
 deploymentTarget = "autoscale"
 run = ["gunicorn", "--bind=0.0.0.0:5000", "--reuse-port", "webapp.app:app"]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000
