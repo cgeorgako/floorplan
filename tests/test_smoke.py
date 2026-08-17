@@ -207,7 +207,7 @@ def test_salon_min_dimension_350():
     for p in generate_proposals(_roomy()):
         for fl in p.floors:
             for r in fl.rooms:
-                if r.category == Category.SALON:
+                if r.category == Category.SALON and r.name:
                     assert min(r.w, r.d) >= 3.50 - 0.05, f"{r.name} {r.w}×{r.d}"
 
 
@@ -231,8 +231,8 @@ def test_salon_prioritised_over_kitchen():
     # (γ) μεγιστοποίηση σαλονιού → σαλόνι φαρδύτερο/μεγαλύτερο από κουζίνα
     for p in generate_proposals(_roomy()):
         fl = p.floors[0]
-        salon = next((r for r in fl.rooms if r.category == Category.SALON), None)
-        kit = next((r for r in fl.rooms if r.category == Category.KITCHEN), None)
+        salon = next((r for r in fl.rooms if r.category == Category.SALON and r.name), None)
+        kit = next((r for r in fl.rooms if r.category == Category.KITCHEN and r.name), None)
         if salon and kit:
             assert salon.w >= kit.w - 0.01, "Το σαλόνι πρέπει να είναι φαρδύτερο από την κουζίνα"
 

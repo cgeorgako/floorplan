@@ -42,7 +42,8 @@ def all_floors(s):
 
 
 def rooms_of(fl, *cats):
-    return [r for r in fl.rooms if r.category in cats]
+    # Μόνο ΟΝΟΜΑΤΙΣΜΕΝΟΙ (υπαρκτοί) χώροι — όχι ανώνυμες open-plan προεκτάσεις.
+    return [r for r in fl.rooms if r.category in cats and r.name]
 
 
 def point_in_polygon(x, y, poly):
@@ -476,6 +477,41 @@ def test_R25_corridor_not_touching_both_side_walls():
             touches_e = c.x1 >= fl.width_ew - fl.ext_wall - 0.06
             assert not (touches_w and touches_e), \
                 "Ο διάδρομος εφάπτεται και στους δύο πλαϊνούς εξωτ. τοίχους"
+
+
+# ─── R26. Σαλόνι: πλάτος & βάθος ≥ 3,50 μ. — ΠΟΤΕ παραβίαση (εφικτά περιγράμματα) ─
+
+def test_R26_salon_350_never_violated():
+    import itertools
+    for W, Ln, area, beds, baths, wcs, sto, hall, shape in itertools.product(
+            [11, 12, 13, 14], [10, 11], [120, 140, 160], [2, 3], [1, 2], [0, 1],
+            [True, False], [True, False], ["auto", "Z", "L", "T", "rectangular"]):
+        s = spec(max_width_ew=W, max_length_ns=Ln, max_total_area=area,
+                 bedrooms=beds, baths=baths, wcs=wcs, has_storage=sto,
+                 has_hall=hall, footprint_shape=shape, num_proposals=2)
+        for _, fl in all_floors(s):
+            for r in rooms_of(fl, Category.SALON):
+                assert min(r.w, r.d) >= 3.50 - 0.005, \
+                    f"{shape} W{W} L{Ln}: σαλόνι {r.w:.2f}×{r.d:.2f} < 3,50"
+            # και το περίγραμμα εντός των ζητούμενων ορίων (εφικτές διαστάσεις)
+            assert fl.width_ew <= W + 0.02 and fl.length_ns <= Ln + 0.02
+
+
+# ─── R27. Κανένας ΑΧΡΗΣΙΜΟΠΟΙΗΤΟΣ χώρος όταν λείπει ο χωλ → στη ζώνη ημέρας ────
+
+def test_R27_no_unused_space_goes_to_day_zone():
+    # Χωρίς χωλ, ο διάδρομος ΔΕΝ φουσκώνει σε αχρησιμοποίητο χώρο· η περίσσεια
+    # δίνεται στο σαλόνι/καθιστικό (ο διάδρομος μένει ≤ 16% του καθαρού).
+    for shape in ("auto", "Z", "L", "T", "rectangular"):
+        for beds in (2, 3, 4):
+            s = spec(has_hall=False, has_storage=True, bedrooms=beds,
+                     footprint_shape=shape, max_width_ew=13.0,
+                     max_length_ns=11.0, max_total_area=160.0, num_proposals=3)
+            for _, fl in all_floors(s):
+                corr = sum(r.area for r in fl.rooms
+                           if r.category == Category.CORRIDOR)
+                assert corr <= 0.16 * fl.net_area + 1e-6, \
+                    f"{shape} b{beds}: διάδρομος {corr:.1f} m² — αχρησιμ. χώρος"
 
 
 if __name__ == "__main__":

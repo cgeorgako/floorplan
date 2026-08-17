@@ -71,15 +71,28 @@ def _add_door(room: Room, side: str, width: float = 0.90, kind: str = "door",
 
 def _fit_widths(areas: List[float], mins: List[float], avail: float,
                 weights: Optional[List[float]] = None,
-                maxes: Optional[List[Optional[float]]] = None) -> List[float]:
+                maxes: Optional[List[Optional[float]]] = None,
+                protected: Optional[List[bool]] = None) -> List[float]:
     """Πλάτη = ελάχιστο + κατανομή πλεονάζοντος κατά `weights` (προεπιλογή:
     ανάλογα με το εμβαδόν). Τηρούνται ελάχιστα και (προαιρετικά) μέγιστα (max_side).
+
+    `protected`: χώροι των οποίων το ελάχιστο ΔΕΝ συρρικνώνεται (π.χ. σαλόνι 3,50 μ.,
+    κύριο υπνοδωμάτιο) — όταν δεν χωρούν όλα, συρρικνώνονται πρώτα οι υπόλοιποι.
     """
     n = len(areas)
     if n == 0:
         return []
+    if protected is None:
+        protected = [False] * n
     if sum(mins) > avail + 1e-6:              # δεν χωρούν ούτε τα ελάχιστα
-        s = avail / sum(mins)
+        prot_sum = sum(mins[i] for i in range(n) if protected[i])
+        rest_min = sum(mins[i] for i in range(n) if not protected[i])
+        if any(protected) and prot_sum <= avail + 1e-6 and rest_min > 1e-6:
+            # τα προστατευμένα κρατούν το ελάχιστό τους· συρρικνώνονται οι υπόλοιποι
+            s = (avail - prot_sum) / rest_min
+            return [mins[i] if protected[i] else mins[i] * max(0.0, s)
+                    for i in range(n)]
+        s = avail / sum(mins)                 # ούτε τα προστατευμένα χωρούν
         return [m * s for m in mins]
     w = weights if weights else areas
     w = [max(1e-6, v) for v in w]
@@ -124,10 +137,15 @@ def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
     avail = (X1 - X0) - lw - rw - (n - 1) * ti
     if avail <= 0:
         avail = max(0.1, (X1 - X0) - lw - rw)
+    # Σαλόνι (3,50 μ.) & κύριο υπνοδωμάτιο: προστατευμένο ελάχιστο πλάτος — δεν
+    # συρρικνώνεται ΠΟΤΕ κάτω από το ελάχιστό του (αίτημα χρήστη).
     widths = _fit_widths([r.target_area for r in ordered],
                          [r.min_width for r in ordered], avail,
                          weights=[r.grow * r.target_area for r in ordered],
-                         maxes=[r.max_side for r in ordered])
+                         maxes=[r.max_side for r in ordered],
+                         protected=[r.category in (Category.SALON,
+                                                   Category.BEDROOM_MASTER)
+                                    for r in ordered])
     rooms: List[Room] = []
     x = X0 + lw
     for idx, (r, w) in enumerate(zip(ordered, widths)):
@@ -140,10 +158,14 @@ def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
             es.add("S")
         # Βόρεια όψη εξωτερική εκτός αν ο χώρος βρίσκεται ΕΞ ΟΛΟΚΛΗΡΟΥ κάτω από την
         # πτέρυγα νύχτας. Αν «πατάει» έστω και εν μέρει στην εσοχή (Γ/Τ), η βόρεια
-        # όψη βλέπει στο ύπαιθρο → εξωτερικός τοίχος (te). Μόνο όταν καλύπτεται
-        # πλήρως από την πτέρυγα παραμένει εσωτερική (ti).
-        if ext.get("n") or (night_x is not None and not (
-                night_x[0] - 0.05 <= rx0 and rx1 <= night_x[1] + 0.05)):
+        # όψη βλέπει στο ύπαιθρο → εξωτερικός τοίχος (te). Εξαίρεση: το ΣΑΛΟΝΙ
+        # κρατά εσωτερική βόρεια όψη (καθαρό βάθος ≥ 3,50) — τοποθετείται έτσι ώστε
+        # να μην «πατά» ουσιαστικά στην εσοχή.
+        if r.category != Category.SALON and (ext.get("n") or (
+                night_x is not None and not (
+                    night_x[0] - 0.05 <= rx0 and rx1 <= night_x[1] + 0.05))):
+            es.add("N")
+        elif ext.get("n"):
             es.add("N")
         if ext.get("w") and idx == 0:
             es.add("W")
@@ -157,6 +179,59 @@ def _place_row(reqs: List[RoomReq], X0: float, X1: float, Y0: float, Y1: float,
         rooms.append(room)
         x = rx1 + ti
     return rooms
+
+
+def _absorb_service_gap(rooms: List[Room], day_rooms: List[Room],
+                        svc_rooms: List[Room], Xc0: float, Xc1: float,
+                        nx0: float, nx1: float, y_svc0: float, y_svc1: float,
+                        ti: float) -> None:
+    """Δίνει τον αχρησιμοποίητο χώρο της ζώνης υπηρεσιών στα δωμάτια ημέρας:
+    όσα δωμάτια ημέρας έχουν καθαρή ζώνη υπηρεσιών από πάνω τους (χωρίς βοηθητικό)
+    επεκτείνονται βόρεια ως τον διάδρομο (μεγαλώνει το σαλόνι/καθιστικό). Ό,τι κενό
+    απομείνει στο κεντρικό τμήμα γίνεται (ελάχιστος) διάδρομος — καμία γκρι ζώνη."""
+    if y_svc1 - y_svc0 < 0.2:
+        return
+    band = [(s.x0, s.x1) for s in svc_rooms
+            if s.y0 < y_svc1 - 0.05 and s.y1 > y_svc0 + 0.05]
+
+    def blocked(a: float, b: float) -> bool:
+        return any(sx0 < b - 0.15 and a < sx1 - 0.15 for sx0, sx1 in band)
+
+    # 1) επέκταση καθαρών δωματίων ημέρας ως τον διάδρομο (μέσα στο κεντρικό τμήμα)
+    occ: List[Tuple[float, float]] = []
+    for d in sorted(day_rooms, key=lambda r: r.x0):
+        ax, bx = max(d.x0, Xc0), min(d.x1, Xc1)
+        if (d.y1 < y_svc1 - 0.06 and d.x0 >= nx0 - 0.05 and d.x1 <= nx1 + 0.05
+                and bx - ax > 0.6 and not blocked(d.x0, d.x1)):
+            d.y1 = y_svc1 - ti / 2.0          # φτάνει ακριβώς κάτω από τον διάδρομο
+            occ.append((ax, bx))
+    for sx0, sx1 in band:
+        occ.append((max(sx0, Xc0), min(sx1, Xc1)))
+    # 2) όποιο κενό απομείνει (π.χ. λόγω μη ευθυγράμμισης) ΔΙΝΕΤΑΙ στο δωμάτιο
+    #    ημέρας από κάτω (σαλόνι/καθιστικό) ως open-plan προέκταση — ΟΧΙ διάδρομος.
+    occ = [iv for iv in occ if iv[1] > iv[0]]
+    occ.sort()
+    gaps: List[Tuple[float, float]] = []
+    cur = Xc0
+    for x0, x1 in occ:
+        if x0 - cur > 0.4:
+            gaps.append((cur, x0))
+        cur = max(cur, x1)
+    if Xc1 - cur > 0.4:
+        gaps.append((cur, Xc1))
+    for gx0, gx1 in gaps:
+        cx = (gx0 + gx1) / 2.0
+        below = next((d for d in day_rooms if d.x0 - 0.05 <= cx <= d.x1 + 0.05),
+                     None)
+        cat = below.category if below else Category.CORRIDOR
+        patch = Room(cat, "", gx0 + ti / 2.0, y_svc0 + ti / 2.0,
+                     gx1 - ti / 2.0, y_svc1 + ti / 2.0)
+        rooms.append(patch)
+        # ανοιχτό πέρασμα προς το δωμάτιο ημέρας από κάτω (ενιαίος χώρος διημέρευσης)
+        if below is not None and below.category in DAY_CATEGORIES:
+            w = min(1.40, max(0.90, (gx1 - gx0) - 0.40))
+            patch.openings.append(Opening("opening", "S",
+                                          (patch.w - w) / 2.0, w))
 
 
 # ─────────────────────────── Διαστασιολόγηση περιγράμματος ────────────────────
@@ -190,10 +265,15 @@ def _geometry(spec: BuildingSpec, program: List[RoomReq], shape: str,
     has_salon = any(r.category == Category.SALON for r in day)
     has_storage = any(r.category == Category.STORAGE for r in svc)
     allow = te + ti / 2.0                 # ανοχή τοίχων: καθαρή = μικτή − allow
-    # Στόχοι ΒΑΘΟΥΣ (καθαρή διάσταση + ανοχή): σαλόνι & master ≥ 3,50 μ.
+    # Στόχοι ΒΑΘΟΥΣ (καθαρή διάσταση + ανοχή): σαλόνι & master ≥ 3,50 μ. Το σαλόνι
+    # τοποθετείται ώστε η βόρεια όψη του να είναι ΕΣΩΤΕΡΙΚΗ (δεν «πατά» στην εσοχή),
+    # άρα καθαρό βάθος = Hd − allow ≥ 3,50 (βλ. _place_row: το σαλόνι δεν σημειώνεται
+    # βόρεια εξωτερικό).
     day_min_d = (3.50 if has_salon else 3.20) + allow
     bed_min_d = max(ms, 3.50) + allow
-    day_floor = (3.00 + allow) if day else 0.0    # απόλυτο κατώφλι βάθους ημέρας
+    # Απόλυτο κατώφλι βάθους ημέρας: με σαλόνι ΠΟΤΕ < 3,50 μ. (καθαρό) — δεν
+    # συρρικνώνεται κάτω από αυτό ούτε στη ρύθμιση ύψους (αίτημα χρήστη).
+    day_floor = day_min_d if day else 0.0
 
     Hd = max(_clamp(day_area / W, day_min_d, 4.9 + allow)
              * (1.0, 1.05, 0.95)[variant % 3], day_min_d) if day else 0.0
@@ -373,13 +453,6 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
             compact = False
 
     if compact:
-        # Δέσμευση θέσης για τον ΚΑΤΑΚΟΡΥΦΟ κλάδο του διαδρόμου (σύνδεση ζώνης
-        # ημέρας ↔ διαδρόμου). Οι κεντρικοί βοηθητικοί τοποθετούνται αριστερά και
-        # ο κλάδος καταλαμβάνει το υπόλοιπο, φτάνοντας ως τη ζώνη ημέρας (y=Hd).
-        stub_w = MIN_CORRIDOR + ti
-        mid_hi = Xc1
-        if mid_reqs and (Xc1 - Xc0) > (stub_w + ti + 0.9):
-            mid_hi = Xc1 - stub_w - ti
         left_rooms = _place_row([left_req], nx0, Xc0, y_svc0, y_bed0, te, ti,
                                 {"s": False, "n": False, "w": True, "e": False},
                                 False, day_x=day_x)
@@ -387,7 +460,7 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
                        {"s": False, "n": False, "w": False, "e": True}, False,
                        day_x=day_x)
                        if right_req else [])
-        mid_rooms = (_place_row(mid_reqs, Xc0, mid_hi, y_svc0, y_svc1, te, ti,
+        mid_rooms = (_place_row(mid_reqs, Xc0, Xc1, y_svc0, y_svc1, te, ti,
                      {"s": False, "n": False, "w": False, "e": False}, mirror,
                      day_x=day_x)
                      if mid_reqs else [])
@@ -396,14 +469,12 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
         corridor = Room(Category.CORRIDOR, "Διάδρομος", Xc0 + ti / 2.0,
                         y_cor0 + ti / 2.0, Xc1 - ti / 2.0, y_cor1 - ti / 2.0)
         rooms.append(corridor)
-        # Κατακόρυφος κλάδος: γεμίζει το κενό δεξιά των βοηθητικών (καμία γκρι
-        # ζώνη) ΚΑΙ κατεβαίνει ως τη ζώνη ημέρας ώστε να συνδέει σαλόνι↔διάδρομο.
-        xm = max((r.x1 for r in mid_rooms), default=Xc0)
-        stub_x0 = xm + ti / 2.0
-        if (Xc1 - ti / 2.0) - stub_x0 > 0.4:
-            stub = Room(Category.CORRIDOR, "", stub_x0, y_svc0 + ti / 2.0,
-                        Xc1 - ti / 2.0, y_cor0 + ti / 2.0)
-            rooms.append(stub)
+        # ΚΑΝΕΝΑΣ ΧΩΡΟΣ ΧΩΡΙΣ ΧΡΗΣΗ: ο αχρησιμοποίητος χώρος της ζώνης υπηρεσιών
+        # (ιδίως χωρίς χωλ) ΔΙΝΕΤΑΙ στα δωμάτια ημέρας — το σαλόνι/καθιστικό
+        # επεκτείνονται βόρεια ως τον διάδρομο. Ό,τι κενό απομείνει γίνεται
+        # (ελάχιστος) διάδρομος που συνδέει τη ζώνη ημέρας με τον διάδρομο.
+        _absorb_service_gap(rooms, day_rooms, svc_rooms, Xc0, Xc1, nx0, nx1,
+                            y_svc0, y_svc1, ti)
     else:
         # Εφεδρική διάταξη: τα λουτρά στα άκρα (εξωτ. Δ/Α όψη → φυσικό φως). Δεσμεύ-
         # εται θέση δεξιά για κατακόρυφο κλάδο που συνδέει τη ζώνη ημέρας με τον
@@ -450,6 +521,15 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
 
     _assign_openings(plan, spec, corridor, day_rooms, bed_rooms, svc_rooms,
                      entrance)
+
+    # Υπέρβαση περιγράμματος: όταν οι ελάχιστες διαστάσεις (σαλόνι 3,50 & υπνοδωμάτια)
+    # ΔΕΝ χωρούν στο ζητούμενο μέγιστο, το περίγραμμα μεγαλώνει ώστε να ΜΗΝ
+    # παραβιαστεί το 3,50 μ. του σαλονιού (ενημέρωση προς τον χρήστη).
+    if not force_H and H > spec.max_length_ns + 0.03:
+        warnings.append(
+            f"Το μήκος (Β–Ν) {H:.2f} m υπερβαίνει το μέγιστο {spec.max_length_ns:.2f} m "
+            f"ώστε να τηρηθεί το ελάχ. 3,50 m του σαλονιού/υπνοδωματίων· "
+            f"αυξήστε το μέγιστο περίγραμμα ή μειώστε τους χώρους.")
 
     # Παρατηρήσεις ελάχιστης πλευράς υπνοδωματίων
     for r in bed_rooms:
@@ -569,11 +649,14 @@ def _assign_openings(plan: FloorPlan, spec: BuildingSpec, corridor: Optional[Roo
     # χώρων (καθιστικό↔σαλόνι↔κουζίνα) — κανόνες 4 & 5.
     ordered_day = sorted(day_rooms, key=lambda r: r.x0)
     for a, b in zip(ordered_day, ordered_day[1:]):
-        depth = min(a.d, b.d)
-        w = min(1.60, max(1.10, depth - 0.6))
-        # άνοιγμα στο κοινό κατακόρυφο τοίχωμα (a δεξιά πλευρά)
-        seg = min(a.d, b.d)
-        off = (a.d - w) / 2.0
+        # κοινό τμήμα τοίχου (τα δωμάτια ημέρας μπορεί να έχουν διαφορετικό βάθος)
+        oy0, oy1 = max(a.y0, b.y0), min(a.y1, b.y1)
+        shared = oy1 - oy0
+        if shared < 0.8:
+            continue
+        w = min(1.60, max(1.10, shared - 0.6))
+        # άνοιγμα κεντραρισμένο στο κοινό τμήμα (πλευρά a: Ανατολή)
+        off = (oy0 - a.y0) + (shared - w) / 2.0
         a.openings.append(Opening("opening", "E", off, w))
 
     # Θύρες προς τον διάδρομο: στην πλευρά κάθε χώρου που εφάπτεται στον
