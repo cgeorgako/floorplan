@@ -14,7 +14,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from floorplan_gen.models import BuildingSpec, Orientation, Category
-from floorplan_gen.layout import generate_proposals, room_gross_dims
+from floorplan_gen.layout import generate_proposals, room_gross_dims, _door_between
 from floorplan_gen.compliance import check_floor
 from floorplan_gen import generator
 
@@ -384,6 +384,98 @@ def test_R21_compliance_report_runs():
     for _, fl in all_floors(spec()):
         rows = check_floor(fl)
         assert rows and all(r.net_area > 0 for r in rows)
+
+
+# ─── R22. ΕΠΙΚΟΙΝΩΝΙΑ: κάθε χώρος προσβάσιμος από τη ζώνη ημέρας (σαλόνι→υ/δ) ──
+
+def _unreachable_from_day(fl):
+    rooms = fl.rooms
+    n = len(rooms)
+    ti, te = fl.int_wall, fl.ext_wall
+    adj = {i: set() for i in range(n)}
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _door_between(rooms[i], rooms[j], ti, te):
+                adj[i].add(j)
+                adj[j].add(i)
+    seed = next((i for i, r in enumerate(rooms)
+                 if r.category in (Category.SALON, Category.LIVING,
+                                   Category.KITCHEN)), 0)
+    seen, st = set(), [seed]
+    while st:
+        u = st.pop()
+        if u in seen:
+            continue
+        seen.add(u)
+        st += [v for v in adj[u] if v not in seen]
+    return [rooms[i].name for i in range(n) if i not in seen and rooms[i].name]
+
+
+def test_R22_all_rooms_reachable_from_salon():
+    # Πρέπει να υπάρχει διαδρομή σαλόνι → διάδρομος → ΚΑΘΕ υπνοδωμάτιο/χώρο.
+    for beds, baths, wcs in ((2, 1, 0), (3, 1, 1), (3, 2, 1), (4, 2, 1),
+                             (2, 1, 1), (5, 2, 2)):
+        for sto in (True, False):
+            for hall in (True, False):
+                for shape in ("auto", "Z", "L", "T", "rectangular"):
+                    s = spec(bedrooms=beds, baths=baths, wcs=wcs,
+                             has_storage=sto, has_hall=hall,
+                             footprint_shape=shape, max_width_ew=14.0,
+                             max_length_ns=12.0, max_total_area=220.0)
+                    for _, fl in all_floors(s):
+                        unr = _unreachable_from_day(fl)
+                        assert not unr, (f"b{beds} ba{baths} wc{wcs} {shape}: "
+                                         f"αποκομμένοι χώροι {unr}")
+
+
+# ─── R23. Λουτρό & WC: ΤΟ ΠΟΛΥ μία εσωτερική θύρα (όχι δύο) ────────────────────
+
+def test_R23_bath_wc_single_interior_door():
+    for beds, baths, wcs in ((3, 1, 1), (3, 2, 1), (4, 2, 2), (2, 1, 0)):
+        for shape in ("auto", "Z", "L", "T", "rectangular"):
+            s = spec(bedrooms=beds, baths=baths, wcs=wcs,
+                     footprint_shape=shape, max_width_ew=14.0,
+                     max_length_ns=12.0, max_total_area=220.0)
+            for _, fl in all_floors(s):
+                for r in fl.rooms:
+                    if r.category in (Category.BATH, Category.WC):
+                        ndoors = sum(1 for o in r.openings
+                                     if o.kind == "door" and not o.to_exterior)
+                        assert ndoors <= 1, (f"{shape}/{r.name}: {ndoors} "
+                                             f"εσωτερικές θύρες (>1)")
+
+
+# ─── R24. Σαλόνι & κουζίνα: όχι πάντα ίδιο πλάτος/μήκος ───────────────────────
+
+def test_R24_salon_kitchen_differ():
+    # Το πλάτος τους διαφέρει ΠΑΝΤΑ· σε πολυγωνικά περιγράμματα διαφέρει και το
+    # μήκος (βάθος) — άρα δεν έχουν πάντα ίδιες διαστάσεις.
+    diff_len = False
+    for shape in ("auto", "Z"):
+        for _, fl in all_floors(spec(footprint_shape=shape, num_proposals=3)):
+            s = rooms_of(fl, Category.SALON)
+            k = rooms_of(fl, Category.KITCHEN)
+            if s and k:
+                assert abs(s[0].w - k[0].w) > 0.05, "ίδιο πλάτος σαλονιού/κουζίνας"
+                if abs(s[0].d - k[0].d) > 0.05:
+                    diff_len = True
+    assert diff_len, "Σαλόνι & κουζίνα πρέπει να μπορούν να διαφέρουν και σε μήκος"
+
+
+# ─── R25. Διάδρομος: ελάχιστο μήκος & δεν εφάπτεται στους δύο πλαϊνούς τοίχους ─
+
+def test_R25_corridor_not_touching_both_side_walls():
+    # Στη συμπαγή διάταξη (≥3 βοηθητικοί) ο διάδρομος είναι εσοχή: δεν αγγίζει
+    # ΚΑΙ τον ανατολικό ΚΑΙ τον δυτικό εξωτερικό τοίχο.
+    for _, fl in all_floors(spec(bedrooms=3, baths=1, wcs=1, has_storage=True,
+                                 has_hall=True, num_proposals=3)):
+        corr = [r for r in fl.rooms
+                if r.category == Category.CORRIDOR and r.name]
+        for c in corr:
+            touches_w = c.x0 <= fl.ext_wall + 0.06
+            touches_e = c.x1 >= fl.width_ew - fl.ext_wall - 0.06
+            assert not (touches_w and touches_e), \
+                "Ο διάδρομος εφάπτεται και στους δύο πλαϊνούς εξωτ. τοίχους"
 
 
 if __name__ == "__main__":
