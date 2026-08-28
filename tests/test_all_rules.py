@@ -514,6 +514,79 @@ def test_R27_no_unused_space_goes_to_day_zone():
                     f"{shape} b{beds}: διάδρομος {corr:.1f} m² — αχρησιμ. χώρος"
 
 
+# ─── ΑΠΑΡΑΒΑΤΟΙ ΚΑΝΟΝΕΣ: λουτρό/WC ≤ 1 θύρα & κανένα πέρασμα μέσα από δωμάτιο ──
+
+from floorplan_gen.layout import _door_between  # noqa: E402
+
+_CIRC = (Category.CORRIDOR, Category.HALL)
+_DAY = (Category.LIVING, Category.SALON, Category.KITCHEN)
+_REAL = list(__import__("itertools").product(
+    [2, 3, 4], [1, 2], [0, 1], [True, False], [True, False],
+    ["auto", "Z", "L", "T", "rectangular"],
+    [Orientation.S, Orientation.N, Orientation.E, Orientation.W]))
+
+
+def _real_floors():
+    for beds, baths, wcs, sto, ward, shape, ent in _REAL:
+        s = spec(bedrooms=beds, baths=baths, wcs=wcs, has_storage=sto,
+                 has_wardrobe=ward, footprint_shape=shape, entrance=ent,
+                 max_width_ew=13.5, max_length_ns=11.0, max_total_area=210.0,
+                 num_proposals=2)
+        for _, fl in all_floors(s):
+            yield (beds, baths, wcs, shape, ent.value), fl
+
+
+def test_R28_bath_wc_at_most_one_door():
+    # ΑΠΑΡΑΒΑΤΟ: λουτρό & WC ΔΕΝ έχουν δύο θύρες (το πολύ μία).
+    for cfg, fl in _real_floors():
+        for r in fl.rooms:
+            if r.category in (Category.BATH, Category.WC):
+                nd = sum(1 for o in r.openings if o.kind == "door")
+                assert nd <= 1, f"{cfg}/{r.name}: {nd} θύρες (>1)"
+
+
+def test_R29_no_passthrough_room():
+    # ΑΠΑΡΑΒΑΤΟ: κανένα πέρασμα μέσα από δωμάτιο — καμία θύρα μεταξύ δύο μη
+    # χώρων κυκλοφορίας (εκτός ανοιχτής ζώνης ημέρας μεταξύ τους).
+    for cfg, fl in _real_floors():
+        rooms, ti, te = fl.rooms, fl.int_wall, fl.ext_wall
+        for i, a in enumerate(rooms):
+            for b in rooms[i + 1:]:
+                if not (a.name and b.name):
+                    continue
+                if a.category in _CIRC or b.category in _CIRC:
+                    continue
+                if a.category in _DAY and b.category in _DAY:
+                    continue
+                assert not _door_between(a, b, ti, te), \
+                    f"{cfg}: πέρασμα {a.name}↔{b.name}"
+
+
+def test_R30_every_room_reachable_realistic():
+    # Κάθε χώρος προσβάσιμος από τη ζώνη ημέρας (σαλόνι→διάδρομος→υπνοδωμάτια).
+    for cfg, fl in _real_floors():
+        rooms, ti, te = fl.rooms, fl.int_wall, fl.ext_wall
+        n = len(rooms)
+        adj = {i: set() for i in range(n)}
+        for i in range(n):
+            for j in range(i + 1, n):
+                if _door_between(rooms[i], rooms[j], ti, te):
+                    adj[i].add(j)
+                    adj[j].add(i)
+        seed = next((i for i, r in enumerate(rooms)
+                     if r.category in _DAY), 0)
+        seen, st = set(), [seed]
+        while st:
+            u = st.pop()
+            if u in seen:
+                continue
+            seen.add(u)
+            st += [v for v in adj[u] if v not in seen]
+        unr = [rooms[i].name for i in range(n)
+               if i not in seen and rooms[i].name]
+        assert not unr, f"{cfg}: αποκομμένοι {unr}"
+
+
 if __name__ == "__main__":
     fns = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     ok = 0
