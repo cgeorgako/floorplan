@@ -250,6 +250,25 @@ def _absorb_service_gap(rooms: List[Room], day_rooms: List[Room],
         link_to_corridor(patch)
 
 
+def _give_to_day(rooms: List[Room], day_rooms: List[Room],
+                 x0: float, x1: float, y_bed0: float, ti: float) -> None:
+    """Ο κερδισμένος χώρος δεξιά του κοντεμένου διαδρόμου (ζώνη [x0,x1] μέχρι τα
+    υπνοδωμάτια) δίνεται ΠΛΗΡΩΣ στο δωμάτιο ημέρας από κάτω (σαλόνι/κουζία/καθι-
+    στικό) ως open-plan προέκταση με θύρα-άνοιγμα προς τα κάτω. Έτσι η μείωση του
+    διαδρόμου μεταφράζεται σε αύξηση της επιφάνειας του σαλονιού — καμία γκρι ζώνη."""
+    for d in sorted(day_rooms, key=lambda r: r.x0):
+        if d.category not in DAY_CATEGORIES:
+            continue
+        a, b = max(d.x0, x0), min(d.x1, x1)
+        if b - a > 0.4 and d.y1 < y_bed0 - 0.06:
+            patch = Room(d.category, "", a + ti / 2.0, d.y1 + ti / 2.0,
+                         b - ti / 2.0, y_bed0 - ti / 2.0)
+            rooms.append(patch)
+            w = min(1.40, max(0.90, (b - a) - 0.40))
+            patch.openings.append(Opening("opening", "S",
+                                          (patch.w - w) / 2.0, w))
+
+
 # ─────────────────────────── Διαστασιολόγηση περιγράμματος ────────────────────
 
 def _geometry(spec: BuildingSpec, program: List[RoomReq], shape: str,
@@ -444,16 +463,26 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
         dry = [r for r in svc if r.category not in (Category.BATH, Category.WC)]
         # η αποθήκη (max 2,00 μ.) ΔΕΝ πάει σε γωνία πλήρους βάθους → τελευταία
         dry.sort(key=lambda r: 1 if r.category == Category.STORAGE else 0)
-        light_pri = baths + wcs                 # όσοι θέλουν εξωτ. φως (λουτρά πρώτα)
-        corner = light_pri[:2]
-        extra_light = light_pri[2:]             # πέραν των 2 γωνιών → κέντρο (εσωτ.)
-        # αν λείπουν «φωτεινοί» για τις 2 γωνίες, συμπλήρωσε με στεγνούς
-        di = 0
-        while len(corner) < 2 and di < len(dry):
-            corner.append(dry[di]); di += 1
-        dry_mid = dry[di:]
-        # μεταβλητή θέση χωλ/στεγνών στο κέντρο ανά πρόταση
-        mid_reqs = extra_light + dry_mid
+        if not poly:
+            # ΕΛΑΧΙΣΤΟΣ ΔΙΑΔΡΟΜΟΣ (ορθογώνιο περίγραμμα, πλήρες πλάτος): ΜΟΝΟ τα
+            # λουτρά μπαίνουν σε γωνία πλήρους βάθους (υποχρεωτικό εξωτ. φως). Το WC
+            # & οι στεγνοί χώροι πάνε ΚΕΝΤΡΙΚΑ (κάτω από τον διάδρομο, όλες οι
+            # πλευρές εσωτερικές — δεν αγγίζουν το περίγραμμα). Έτσι, όταν υπάρχει
+            # μία μόνο γωνία-λουτρό, ο διάδρομος ΔΕΝ φτάνει ως την άλλη άκρη και ο
+            # χώρος που κερδίζεται δίνεται στο σαλόνι/κουζίνα.
+            corner = baths[:2]
+            mid_reqs = wcs + dry
+        else:
+            # Πολυγωνικό περίγραμμα (Γ/Τ/Ζ): οι κεντρικοί χώροι μπορεί να αγγίξουν
+            # το περίγραμμα, οπότε γεμίζουμε ΚΑΙ τις δύο γωνίες (φως στα άκρα).
+            light_pri = baths + wcs             # όσοι θέλουν εξωτ. φως (λουτρά πρώτα)
+            corner = light_pri[:2]
+            extra_light = light_pri[2:]         # πέραν των 2 γωνιών → κέντρο (εσωτ.)
+            # αν λείπουν «φωτεινοί» για τις 2 γωνίες, συμπλήρωσε με στεγνούς
+            di = 0
+            while len(corner) < 2 and di < len(dry):
+                corner.append(dry[di]); di += 1
+            mid_reqs = extra_light + dry[di:]
         if mid_reqs:
             k = variant % len(mid_reqs)
             mid_reqs = mid_reqs[k:] + mid_reqs[:k]
@@ -484,7 +513,15 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
         # δωμάτιο. Με χωλ, η σύνδεση γίνεται μέσω αυτού.
         has_hall_room = any(r.category == Category.HALL for r in svc)
         mid_hi = Xc1
-        if (not has_hall_room and mid_reqs
+        if not right_req and mid_reqs:
+            # ΣΥΜΠΑΓΗΣ τοποθέτηση κεντρικών βοηθητικών στα ΑΡΙΣΤΕΡΑ (φυσικό πλάτος)
+            # → ο διάδρομος κοντύνει και ο χώρος δεξιά δίνεται στο σαλόνι/κουζίνα.
+            svc_d = max(1.0, (y_svc1 - y_svc0) - ti)
+            mw = sum(_clamp(r.target_area / svc_d, r.min_width,
+                            r.max_side if r.max_side else 0.30 * Wn)
+                     for r in mid_reqs)
+            mid_hi = min(Xc1, Xc0 + ti / 2.0 + mw + len(mid_reqs) * ti)
+        elif (not has_hall_room and mid_reqs
                 and (Xc1 - Xc0) > (MIN_CORRIDOR + 2 * ti + 0.8)):
             mid_hi = Xc1 - (MIN_CORRIDOR + ti) - ti
         mid_rooms = (_place_row(mid_reqs, Xc0, mid_hi, y_svc0, y_svc1, te, ti,
@@ -493,15 +530,30 @@ def layout_floor(spec: BuildingSpec, program: List[RoomReq], floor_label: str,
                      if mid_reqs else [])
         svc_rooms = left_rooms + mid_rooms + right_rooms
         rooms += svc_rooms
+        # ΕΛΑΧΙΣΤΟ ΜΗΚΟΣ ΔΙΑΔΡΟΜΟΥ: το αριστερό άκρο στη γωνία-λουτρό· το δεξί
+        # φτάνει ΜΟΝΟ ως το δεξιότερο δωμάτιο/βοηθητικό που εξυπηρετεί (αν δεν
+        # υπάρχει δεξιά γωνία-λουτρό). Ο υπόλοιπος χώρος δίνεται στο σαλόνι.
+        dw = 0.90
+        if right_req:
+            cxR = Xc1
+        else:
+            need = Xc0 + MIN_CORRIDOR + ti
+            for b in bed_rooms:
+                if min(b.x1, Xc1) - max(b.x0, Xc0) > 0.2:
+                    need = max(need, b.x0 + dw + ti)     # φτάνει το δεξιότερο υ/δ
+            if mid_rooms:
+                need = max(need, max(m.x1 for m in mid_rooms) + ti)
+            cxR = min(Xc1, need)
         corridor = Room(Category.CORRIDOR, "Διάδρομος", Xc0 + ti / 2.0,
-                        y_cor0 + ti / 2.0, Xc1 - ti / 2.0, y_cor1 - ti / 2.0)
+                        y_cor0 + ti / 2.0, cxR - ti / 2.0, y_cor1 - ti / 2.0)
         rooms.append(corridor)
-        # ΚΑΝΕΝΑΣ ΧΩΡΟΣ ΧΩΡΙΣ ΧΡΗΣΗ: ο αχρησιμοποίητος χώρος της ζώνης υπηρεσιών
-        # (ιδίως χωρίς χωλ) ΔΙΝΕΤΑΙ στα δωμάτια ημέρας — το σαλόνι/καθιστικό
-        # επεκτείνονται βόρεια ως τον διάδρομο. Ό,τι κενό απομείνει γίνεται
-        # (ελάχιστος) διάδρομος που συνδέει τη ζώνη ημέρας με τον διάδρομο.
-        _absorb_service_gap(rooms, day_rooms, svc_rooms, corridor, Xc0, Xc1,
+        # ΚΑΝΕΝΑΣ ΑΧΡΗΣΙΜΟΠΟΙΗΤΟΣ ΧΩΡΟΣ: κάτω από τον διάδρομο το σαλόνι/καθιστικό
+        # επεκτείνεται ως τον διάδρομο (με θύρα)· δεξιά του κοντού διαδρόμου ο
+        # κερδισμένος χώρος δίνεται πλήρως στο σαλόνι (ως τα υπνοδωμάτια).
+        _absorb_service_gap(rooms, day_rooms, svc_rooms, corridor, Xc0, cxR,
                             nx0, nx1, y_svc0, y_svc1, ti)
+        if Xc1 - cxR > 0.4:
+            _give_to_day(rooms, day_rooms, cxR, Xc1, y_bed0, ti)
     else:
         # Εφεδρική διάταξη: τα λουτρά στα άκρα (εξωτ. Δ/Α όψη → φυσικό φως). Δεσμεύ-
         # εται θέση δεξιά για κατακόρυφο κλάδο που συνδέει τη ζώνη ημέρας με τον
